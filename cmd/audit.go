@@ -138,8 +138,7 @@ func repairDay(path string, dryRun bool, apply bool, w io.Writer) (bool, bool, e
 	anchor := strings.TrimSpace(string(anchorBytes))
 	prev := ""
 	if anchor != "" {
-		prev = anchor
-		fmt.Fprintf(w, "INFO: %s has anchor %s — using as starting prev\n", path, anchor)
+		fmt.Fprintf(w, "INFO: %s has anchor %s — will compare against end-of-chain\n", path, anchor)
 	} else {
 		fmt.Fprintf(w, "INFO: %s has no anchor — starting prev empty\n", path)
 	}
@@ -389,11 +388,10 @@ func verifyDay(path string, w io.Writer) bool {
 		return true
 	}
 
-	// Starting prev: use anchor if present, otherwise empty
+	// Starting prev is empty; if anchor exists we will compare it against the end-of-chain
 	prev := ""
 	if anchor != "" {
-		prev = anchor
-		fmt.Fprintf(w, "INFO: using anchor %s for %s\n", anchor, path)
+		fmt.Fprintf(w, "INFO: anchor present for %s: %s (will compare at end)\n", path, anchor)
 	}
 
 	for i, raw := range lines {
@@ -468,8 +466,12 @@ func verifyDay(path string, w io.Writer) bool {
 			return false
 		}
 
-		// Advance prev using the canonical value to keep chain consistent going forward
-		prev = calcCanonical
+		// Advance prev using whichever hash matched (canonical or legacy)
+		if e.Hash == calcCanonical {
+			prev = calcCanonical
+		} else {
+			prev = calcLegacy
+		}
 	}
 
 	// If anchor exists, compare final prev to anchor
