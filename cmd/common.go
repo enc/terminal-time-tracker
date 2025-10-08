@@ -16,20 +16,20 @@ import (
 )
 
 type Event struct {
-	ID        string            `json:"id"`
-	Type      string            `json:"type"` // start|stop|add|amend|pause|resume|note
-	TS        time.Time         `json:"ts"`
-	User      string            `json:"user,omitempty"`
-	Customer  string            `json:"customer,omitempty"`
-	Project   string            `json:"project,omitempty"`
-	Activity  string            `json:"activity,omitempty"`
-	Billable  *bool             `json:"billable,omitempty"`
-	Note      string            `json:"note,omitempty"`
-	Tags      []string          `json:"tags,omitempty"`
-	Ref       string            `json:"ref,omitempty"` // link to entry id for amend/note
-	Meta      map[string]string `json:"meta,omitempty"`
-	PrevHash  string            `json:"prev_hash,omitempty"`
-	Hash      string            `json:"hash,omitempty"`
+	ID       string            `json:"id"`
+	Type     string            `json:"type"` // start|stop|add|amend|pause|resume|note
+	TS       time.Time         `json:"ts"`
+	User     string            `json:"user,omitempty"`
+	Customer string            `json:"customer,omitempty"`
+	Project  string            `json:"project,omitempty"`
+	Activity string            `json:"activity,omitempty"`
+	Billable *bool             `json:"billable,omitempty"`
+	Note     string            `json:"note,omitempty"`
+	Tags     []string          `json:"tags,omitempty"`
+	Ref      string            `json:"ref,omitempty"` // link to entry id for amend/note
+	Meta     map[string]string `json:"meta,omitempty"`
+	PrevHash string            `json:"prev_hash,omitempty"`
+	Hash     string            `json:"hash,omitempty"`
 }
 
 type Entry struct {
@@ -81,9 +81,13 @@ func writeEvent(e Event) error {
 
 	line, _ := json.Marshal(e)
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer f.Close()
-	if _, err := f.Write(append(line, '\n')); err != nil { return err }
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		return err
+	}
 	writeLastHash(p, e.Hash)
 	return nil
 }
@@ -93,7 +97,9 @@ func boolPtr(b bool) *bool { return &b }
 func nowLocal() time.Time {
 	loc := time.Local
 	if tz := viper.GetString("timezone"); tz != "" {
-		if l, err := time.LoadLocation(tz); err == nil { loc = l }
+		if l, err := time.LoadLocation(tz); err == nil {
+			loc = l
+		}
 	}
 	return time.Now().In(loc)
 }
@@ -101,16 +107,20 @@ func nowLocal() time.Time {
 // Materialize entries from events for a given date range
 func loadEntries(from, to time.Time) ([]Entry, error) {
 	// Normalize to local day boundaries
-	from = time.Date(from.Year(), from.Month(), from.Day(), 0,0,0,0, from.Location())
-	to = time.Date(to.Year(), to.Month(), to.Day(), 23,59,59,0, to.Location())
+	from = time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
+	to = time.Date(to.Year(), to.Month(), to.Day(), 23, 59, 59, 0, to.Location())
 
 	var events []Event
-	for d := from; !d.After(to); d = d.AddDate(0,0,1) {
+	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
 		p := journalPathFor(d)
 		b, err := os.ReadFile(p)
-		if err != nil { continue }
+		if err != nil {
+			continue
+		}
 		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-			if strings.TrimSpace(line) == "" { continue }
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
 			var ev Event
 			if err := json.Unmarshal([]byte(line), &ev); err == nil {
 				events = append(events, ev)
@@ -127,20 +137,26 @@ func loadEntries(from, to time.Time) ([]Entry, error) {
 		case "start":
 			if current != nil {
 				// auto-stop previous at this event ts
-				cur := now := ev.TS
+				cur := ev.TS
 				current.End = &cur
 				entries = append(entries, *current)
 			}
 			billable := true
-			if ev.Billable != nil { billable = *ev.Billable }
+			if ev.Billable != nil {
+				billable = *ev.Billable
+			}
 			current = &Entry{
 				ID: ev.ID, Start: ev.TS, Customer: ev.Customer, Project: ev.Project,
 				Activity: ev.Activity, Billable: billable,
 				Notes: []string{}, Tags: ev.Tags,
 			}
-			if ev.Note != "" { current.Notes = append(current.Notes, ev.Note) }
+			if ev.Note != "" {
+				current.Notes = append(current.Notes, ev.Note)
+			}
 		case "note":
-			if current != nil { current.Notes = append(current.Notes, ev.Note) }
+			if current != nil {
+				current.Notes = append(current.Notes, ev.Note)
+			}
 		case "stop":
 			if current != nil {
 				cur := ev.TS
@@ -150,7 +166,9 @@ func loadEntries(from, to time.Time) ([]Entry, error) {
 			}
 		case "add":
 			billable := true
-			if ev.Billable != nil { billable = *ev.Billable }
+			if ev.Billable != nil {
+				billable = *ev.Billable
+			}
 			// ev.Ref is "startISO..endISO"
 			parts := strings.Split(ev.Ref, "..")
 			if len(parts) == 2 {
@@ -167,7 +185,9 @@ func loadEntries(from, to time.Time) ([]Entry, error) {
 }
 
 func durationMinutes(e Entry) int {
-	if e.End == nil { return 0 }
+	if e.End == nil {
+		return 0
+	}
 	d := e.End.Sub(e.Start)
 	return int(d.Minutes())
 }
@@ -180,25 +200,39 @@ type Rounding struct {
 
 func getRounding() Rounding {
 	q := viper.GetInt("rounding.quantum_min")
-	if q == 0 { q = 15 }
+	if q == 0 {
+		q = 15
+	}
 	min := viper.GetInt("rounding.minimum_billable_min")
-	return Rounding{ Strategy: viper.GetString("rounding.strategy"), QuantumMin: q, MinimumEntry: min }
+	return Rounding{Strategy: viper.GetString("rounding.strategy"), QuantumMin: q, MinimumEntry: min}
 }
 
 func roundMinutes(min int, r Rounding) int {
-	if min <= 0 { return 0 }
+	if min <= 0 {
+		return 0
+	}
 	q := r.QuantumMin
-	if q <= 0 { q = 15 }
+	if q <= 0 {
+		q = 15
+	}
 	switch r.Strategy {
 	case "down":
 		min = (min / q) * q
 	case "nearest":
 		rem := min % q
-		if rem*2 >= q { min = ((min/q)+1)*q } else { min = (min/q)*q }
+		if rem*2 >= q {
+			min = ((min / q) + 1) * q
+		} else {
+			min = (min / q) * q
+		}
 	default: // up
-		if min % q != 0 { min = ((min/q)+1)*q }
+		if min%q != 0 {
+			min = ((min / q) + 1) * q
+		}
 	}
-	if r.MinimumEntry > 0 && min < r.MinimumEntry { min = r.MinimumEntry }
+	if r.MinimumEntry > 0 && min < r.MinimumEntry {
+		min = r.MinimumEntry
+	}
 	return min
 }
 
@@ -206,7 +240,9 @@ func parseRangeFlags(today bool, week bool, rng string) (time.Time, time.Time) {
 	now := nowLocal()
 	if rng != "" {
 		parts := strings.Split(rng, "..")
-		if len(parts) != 2 { cobra.CheckErr(fmt.Errorf("invalid --range; expected A..B")) }
+		if len(parts) != 2 {
+			cobra.CheckErr(fmt.Errorf("invalid --range; expected A..B"))
+		}
 		from := mustParseTimeLocal(parts[0])
 		to := mustParseTimeLocal(parts[1])
 		return from, to
@@ -216,9 +252,11 @@ func parseRangeFlags(today bool, week bool, rng string) (time.Time, time.Time) {
 	}
 	if week {
 		wd := int(now.Weekday())
-		if wd == 0 { wd = 7 } // make Monday=1..Sunday=7
-		monday := now.AddDate(0,0,-(wd-1))
-		return monday, monday.AddDate(0,0,6)
+		if wd == 0 {
+			wd = 7
+		} // make Monday=1..Sunday=7
+		monday := now.AddDate(0, 0, -(wd - 1))
+		return monday, monday.AddDate(0, 0, 6)
 	}
 	// default: today
 	return now, now
