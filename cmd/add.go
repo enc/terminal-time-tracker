@@ -22,14 +22,20 @@ var addCmd = &cobra.Command{
 		st := mustParseTimeLocal(args[0])
 		en := mustParseTimeLocal(args[1])
 		cust, proj := "", ""
-		if len(args) > 2 { cust = args[2] }
-		if len(args) > 3 { proj = args[3] }
-		id := fmt.Sprintf("tt_%d", time.Now().UnixNano())
-		ev := Event{ ID: id, Type: "add", TS: nowLocal(), Customer: cust, Project: proj,
-			Activity: addActivity, Billable: boolPtr(addBillable), Note: addNote, Tags: addTags,
-			Ref: st.Format(time.RFC3339)+".."+en.Format(time.RFC3339),
+		if len(args) > 2 {
+			cust = args[2]
 		}
-		if err := writeEvent(ev); err != nil { cobra.CheckErr(err) }
+		if len(args) > 3 {
+			proj = args[3]
+		}
+		id := fmt.Sprintf("tt_%d", time.Now().UnixNano())
+		ev := Event{ID: id, Type: "add", TS: nowLocal(), Customer: cust, Project: proj,
+			Activity: addActivity, Billable: boolPtr(addBillable), Note: addNote, Tags: addTags,
+			Ref: st.Format(time.RFC3339) + ".." + en.Format(time.RFC3339),
+		}
+		if err := writeEvent(ev); err != nil {
+			cobra.CheckErr(err)
+		}
 		fmt.Printf("Added %s..%s %s %s [%s]\n", st.Format(time.Kitchen), en.Format(time.Kitchen), cust, proj, addActivity)
 	},
 }
