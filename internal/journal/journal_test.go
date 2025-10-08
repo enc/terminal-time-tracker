@@ -180,3 +180,148 @@ func TestParseStream_EmitsEntries(t *testing.T) {
 		t.Fatalf("unexpected customer in streamed entry: %q", got[0].Customer)
 	}
 }
+
+func TestOutOfOrderEventsSorted(t *testing.T) {
+	// stop appears before start; parser must sort by TS to reconstruct correctly
+	input := strings.Join([]string{
+		`{"id":"st1","type":"stop","ts":"2025-01-07T10:00:00Z"}`,
+		`{"id":"s1","type":"start","ts":"2025-01-07T09:00:00Z","project":"p","activity":"a"}`,
+	}, "\n")
+	p := NewParser("")
+	ents, err := p.ParseReader(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ParseReader error: %v", err)
+	}
+	if len(ents) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(ents))
+	}
+	if !ents[0].Start.Equal(mustParse(t, "2025-01-07T09:00:00Z")) || ents[0].End == nil || !ents[0].End.Equal(mustParse(t, "2025-01-07T10:00:00Z")) {
+		t.Fatalf("unexpected reconstructed window: %v..%v", ents[0].Start, ents[0].End)
+	}
+}
+
+func TestUnknownAndOrphanNoteIgnored(t *testing.T) {
+	// Orphan note (no current running entry) should be ignored.
+	// Unknown types like pause/resume are ignored by reconstruction.
+	input := strings.Join([]string{
+		`{"id":"n0","type":"note","ts":"2025-01-08T08:30:00Z","note":"ignored"}`,
+		`{"id":"p1","type":"pause","ts":"2025-01-08T08:45:00Z"}`,
+		`{"id":"s1","type":"start","ts":"2025-01-08T09:00:00Z","project":"proj","activity":"dev"}`,
+		`{"id":"r1","type":"resume","ts":"2025-01-08T09:10:00Z"}`,
+		`{"id":"n1","type":"note","ts":"2025-01-08T09:15:00Z","note":"kept"}`,
+		`{"id":"st1","type":"stop","ts":"2025-01-08T10:00:00Z"}`,
+	}, "\n")
+
+	p := NewParser("")
+	ents, err := p.ParseReader(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ParseReader error: %v", err)
+	}
+	if len(ents) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(ents))
+	}
+	if len(ents[0].Notes) != 1 || ents[0].Notes[0] != "kept" {
+		t.Fatalf("expected only in-run note to be kept, got %#v", ents[0].Notes)
+	}
+}
+
+func TestMultipleStartsAutoStop(t *testing.T) {
+	// Second start auto-stops the first entry at its timestamp
+	input := strings.Join([]string{
+		`{"id":"s1","type":"start","ts":"2025-01-09T09:00:00Z","project":"p","activity":"a"}`,
+		`{"id":"s2","type":"start","ts":"2025-01-09T09:30:00Z","project":"p","activity":"a"}`,
+		`{"id":"st2","type":"stop","ts":"2025-01-09T10:00:00Z"}`,
+	}, "\n")
+
+	p := NewParser("")
+	ents, err := p.ParseReader(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ParseReader error: %v", err)
+	}
+	if len(ents) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(ents))
+	}
+	// First entry: 09:00..09:30
+	if !ents[0].Start.Equal(mustParse(t, "2025-01-09T09:00:00Z")) || ents[0].End == nil || !ents[0].End.Equal(mustParse(t, "2025-01-09T09:30:00Z")) {
+		t.Fatalf("first auto-stopped window mismatch: %v..%v", ents[0].Start, ents[0].End)
+	}
+	// Second entry: 09:30..10:00
+	if !ents[1].Start.Equal(mustParse(t, "2025-01-09T09:30:00Z")) || ents[1].End == nil || !ents[1].End.Equal(mustParse(t, "2025-01-09T10:00:00Z")) {
+		t.Fatalf("second window mismatch: %v..%v", ents[1].Start, ents[1].End)
+	}
+}
+
+func TestAddInvalidRefNonStrictSkips(t *testing.T) {
+	// Non-strict mode should skip bad add refs but keep valid ones
+	input := strings.Join([]string{
+		`{"id":"aBad","type":"add","ts":"2025-01-10T12:00:00Z","ref":"bad-ref"}`,
+		`{"id":"aGood","type":"add","ts":"2025-01-10T12:05:00Z","ref":"2025-01-10T08:00:00Z..2025-01-10T09:00:00Z","project":"p","activity":"meet"}`,
+	}, "\n")
+	p := NewParser("")
+	ents, err := p.ParseReader(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ParseReader error: %v", err)
+	}
+	if len(ents) != 1 {
+		t.Fatalf("expected 1 entry (skip bad add), got %d", len(ents))
+	}
+	if !ents[0].Start.Equal(mustParse(t, "2025-01-10T08:00:00Z")) || ents[0].End == nil || !ents[0].End.Equal(mustParse(t, "2025-01-10T09:00:00Z")) {
+		t.Fatalf("valid add not reconstructed correctly: %v..%v", ents[0].Start, ents[0].End)
+	}
+}
+
+func TestParseFile_StrictError_PopulatesPathAndLine(t *testing.T) {
+	content := strings.Join([]string{
+		`{"id":"s1","type":"start","ts":"2025-01-11T09:00:00Z"}`,
+		`{bad json line}`,
+	}, "\n")
+	tmpf, err := os.CreateTemp("", "journal_path_line_*.jsonl")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	path := tmpf.Name()
+	tmpf.Close()
+	defer os.Remove(path)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	p := NewParser("")
+	p.Strict = true
+	_, perr := p.ParseFile(path)
+	if perr == nil {
+		t.Fatalf("expected strict parse error")
+	}
+	var pe *ParseError
+	if !errors.As(perr, &pe) {
+		t.Fatalf("expected ParseError, got %T: %v", perr, perr)
+	}
+	if pe.Path != path || pe.Line != 2 {
+		t.Fatalf("expected path=%q line=2, got path=%q line=%d", path, pe.Path, pe.Line)
+	}
+}
+
+func TestTagsAndBillableDefaults(t *testing.T) {
+	input := strings.Join([]string{
+		// start with billable omitted -> defaults to true, tags kept
+		`{"id":"s1","type":"start","ts":"2025-01-12T09:00:00Z","project":"p","activity":"a","tags":["t1","t2"]}`,
+		`{"id":"st1","type":"stop","ts":"2025-01-12T10:00:00Z"}`,
+		// add with explicit billable=false and tags
+		`{"id":"a1","type":"add","ts":"2025-01-12T12:00:00Z","ref":"2025-01-12T12:00:00Z..2025-01-12T12:30:00Z","project":"p2","activity":"b","billable":false,"tags":["u1"]}`,
+	}, "\n")
+
+	p := NewParser("")
+	ents, err := p.ParseReader(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ParseReader error: %v", err)
+	}
+	if len(ents) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(ents))
+	}
+	if !ents[0].Billable || len(ents[0].Tags) != 2 || ents[0].Tags[0] != "t1" || ents[0].Tags[1] != "t2" {
+		t.Fatalf("first entry billable default or tags mismatch: billable=%v tags=%#v", ents[0].Billable, ents[0].Tags)
+	}
+	if ents[1].Billable || len(ents[1].Tags) != 1 || ents[1].Tags[0] != "u1" {
+		t.Fatalf("second entry billable/tags mismatch: billable=%v tags=%#v", ents[1].Billable, ents[1].Tags)
+	}
+}
