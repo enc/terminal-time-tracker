@@ -357,3 +357,128 @@ func trimForPreview(s string) string {
 	}
 	return s
 }
+
+// verifyDay inspects a single journal day file and writes concise diagnostics to w.
+// Returns true if verification passed, false otherwise.
+func verifyDay(path string, w io.Writer) bool {
+	// Open file
+	f, err := os.Open(path)
+	if err != nil {
+		fmt.Fprintf(w, "ERROR: cannot open journal file %s: %v\n", path, err)
+		return false
+	}
+	defer f.Close()
+
+	// Read anchor (if any)
+	anchorPath := strings.TrimSuffix(path, ".jsonl") + ".hash"
+	anchorBytes, _ := os.ReadFile(anchorPath)
+	anchor := strings.TrimSpace(string(anchorBytes))
+
+	// Read lines
+	s := bufio.NewScanner(f)
+	lines := []string{}
+	for s.Scan() {
+		lines = append(lines, s.Text())
+	}
+	if err := s.Err(); err != nil {
+		fmt.Fprintf(w, "ERROR: scanning %s: %v\n", path, err)
+		return false
+	}
+	if len(lines) == 0 {
+		// nothing to verify
+		return true
+	}
+
+	// Starting prev: use anchor if present, otherwise empty
+	prev := ""
+	if anchor != "" {
+		prev = anchor
+		fmt.Fprintf(w, "INFO: using anchor %s for %s\n", anchor, path)
+	}
+
+	for i, raw := range lines {
+		lineNo := i + 1
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			// skip blank
+			continue
+		}
+		var e Event
+		if err := json.Unmarshal([]byte(trimmed), &e); err != nil {
+			sn := trimmed
+			if len(sn) > 200 {
+				sn = sn[:200] + "..."
+			}
+			fmt.Fprintf(w, "ERROR: JSON parse failed at %s:%d: %v\nLINE: %s\n", path, lineNo, err, sn)
+			return false
+		}
+
+		// canonical payload
+		cp := canonicalPayload{
+			ID:       e.ID,
+			Type:     e.Type,
+			TS:       e.TS.Format(time.RFC3339Nano),
+			User:     e.User,
+			Customer: e.Customer,
+			Project:  e.Project,
+			Activity: e.Activity,
+			Billable: e.Billable,
+			Note:     e.Note,
+			Tags:     e.Tags,
+			Ref:      e.Ref,
+			PrevHash: prev,
+		}
+		jc, _ := json.Marshal(cp)
+		hc := sha256.Sum256(jc)
+		calcCanonical := hex.EncodeToString(hc[:])
+
+		// legacy-map payload
+		lm := map[string]any{
+			"id":        e.ID,
+			"type":      e.Type,
+			"ts":        e.TS.Format(time.RFC3339Nano),
+			"user":      e.User,
+			"customer":  e.Customer,
+			"project":   e.Project,
+			"activity":  e.Activity,
+			"billable":  e.Billable,
+			"note":      e.Note,
+			"tags":      e.Tags,
+			"ref":       e.Ref,
+			"prev_hash": prev,
+		}
+		jm, _ := json.Marshal(lm)
+		hm := sha256.Sum256(jm)
+		calcLegacy := hex.EncodeToString(hm[:])
+
+		// Accept either canonical or legacy to be tolerant of older files.
+		if e.Hash == calcCanonical {
+			// OK
+		} else if e.Hash == calcLegacy {
+			// OK (legacy)
+			fmt.Fprintf(w, "INFO: legacy hash matched at %s:%d (id=%s)\n", path, lineNo, e.ID)
+		} else {
+			// Not matching either
+			fmt.Fprintf(w, "ERROR: hash mismatch at %s:%d (id=%s)\n", path, lineNo, e.ID)
+			fmt.Fprintf(w, "  stored : %s\n", e.Hash)
+			fmt.Fprintf(w, "  canonical: %s\n", calcCanonical)
+			fmt.Fprintf(w, "  legacy   : %s\n", calcLegacy)
+			fmt.Fprintf(w, "  prev used: %s\n", prev)
+			fmt.Fprintf(w, "SUGGESTION: inspect line with: sed -n '%dp' %s\n", lineNo, path)
+			return false
+		}
+
+		// Advance prev using the canonical value to keep chain consistent going forward
+		prev = calcCanonical
+	}
+
+	// If anchor exists, compare final prev to anchor
+	if anchor != "" && anchor != prev {
+		fmt.Fprintf(w, "ERROR: anchor mismatch for %s\n", path)
+		fmt.Fprintf(w, "  anchor file (%s) contains: %s\n", anchorPath, anchor)
+		fmt.Fprintf(w, "  recomputed chain-end hash: %s\n", prev)
+		return false
+	}
+
+	return true
+}
