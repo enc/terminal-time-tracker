@@ -34,6 +34,21 @@ type Event struct {
 	Hash     string            `json:"hash,omitempty"`
 }
 
+type canonicalPayload struct {
+	ID       string   `json:"id"`
+	Type     string   `json:"type"`
+	TS       string   `json:"ts"`
+	User     string   `json:"user,omitempty"`
+	Customer string   `json:"customer,omitempty"`
+	Project  string   `json:"project,omitempty"`
+	Activity string   `json:"activity,omitempty"`
+	Billable *bool    `json:"billable,omitempty"`
+	Note     string   `json:"note,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
+	Ref      string   `json:"ref,omitempty"`
+	PrevHash string   `json:"prev_hash,omitempty"`
+}
+
 type Entry struct {
 	ID       string
 	Start    time.Time
@@ -70,14 +85,22 @@ func writeEvent(e Event) error {
 	p := journalPathFor(e.TS)
 	prev := readLastHash(p)
 	e.PrevHash = prev
-	// Deterministic hash over core fields + prev
-	payload := map[string]any{
-		"id": e.ID, "type": e.Type, "ts": e.TS.Format(time.RFC3339Nano),
-		"user": e.User, "customer": e.Customer, "project": e.Project,
-		"activity": e.Activity, "billable": e.Billable, "note": e.Note,
-		"tags": e.Tags, "ref": e.Ref, "prev_hash": e.PrevHash,
+	// Deterministic hash over core fields + prev using a canonical struct to ensure stable JSON ordering
+	cp := canonicalPayload{
+		ID:       e.ID,
+		Type:     e.Type,
+		TS:       e.TS.Format(time.RFC3339Nano),
+		User:     e.User,
+		Customer: e.Customer,
+		Project:  e.Project,
+		Activity: e.Activity,
+		Billable: e.Billable,
+		Note:     e.Note,
+		Tags:     e.Tags,
+		Ref:      e.Ref,
+		PrevHash: e.PrevHash,
 	}
-	j, _ := json.Marshal(payload)
+	j, _ := json.Marshal(cp)
 	h := sha256.Sum256(j)
 	e.Hash = hex.EncodeToString(h[:])
 

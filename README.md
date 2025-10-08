@@ -156,3 +156,71 @@ If you'd like, I can:
 - Add caching to completion suggestions to improve performance on very large journals.
 
 Happy to proceed with any of the above — tell me which option you prefer.
+
+## Repairing journal hashes: `tt audit repair`
+
+This repository includes an `audit` command with a new `repair` subcommand that helps you migrate and repair journal files' per-record hashes in a safe, inspectable way.
+
+High level
+- `tt audit repair` recomputes canonical hashes for every event in your journal files and proposes rewrites.
+- The command defaults to a safe dry-run mode: it writes proposed repairs beside your originals (`<file>.repair` and `<file>.hash.repair`) and prints a small diff preview so you can inspect changes before applying them.
+- When you're confident, you can apply changes to originals with `--dry-run=false --apply=true`. The tool makes backups before overwriting.
+
+Why this exists
+- Older versions of the writer computed the hash payload using a `map[string]any` which could marshal to JSON with unpredictable key order.
+- Newer code uses a canonical struct to guarantee deterministic JSON bytes and stable hashes.
+- `tt audit repair` migrates legacy-map hashed records to the canonical format and fixes `prev_hash` propagation so the chain is consistent.
+
+Important flags
+- `--dry-run` (default: true) — write proposed files (`.repair` and `.hash.repair`) and do not modify originals.
+- `--apply` (must be used with `--dry-run=false`) — perform destructive rewrite: original file is renamed to `<file>.bak`, the repaired content is written to the original path, and the anchor (`.hash`) is updated (the original anchor is backed up as `.hash.bak` if present).
+
+Recommended safe workflow
+1. Verify current journals:
+   - `tt audit verify`
+   - Fix any obvious parse errors or unrelated issues first.
+2. Run repair in dry-run mode (default):
+   - `tt audit repair`
+     This will create `<file>.repair` and `<file>.hash.repair` beside each file that would be changed, and print a brief inline preview of the first differences.
+3. Inspect proposed changes:
+   - Open the `.repair` file(s) and compare them with the originals:
+     - `diff -u ~/.tt/journal/2025/10/2025-10-07.jsonl ~/.tt/journal/2025/10/2025-10-07.jsonl.repair`
+     - Or use the inline preview already printed by the command.
+4. Optionally run the small check helper (or the `verify` command) against the `.repair` files to ensure the rewritten chain is valid.
+5. When satisfied, apply the repairs (destructive):
+   - `tt audit repair --dry-run=false --apply=true`
+   - Originals are moved to `<file>.bak` and anchors to `.hash.bak` (if present). The new files and anchors are written in place.
+6. Re-run `tt audit verify` to confirm the repository is consistent after applying repairs.
+
+Behavior notes / edge cases
+- If a record's stored hash matches the legacy-map computation, the repair migrates it to canonical (updates `prev_hash` and `hash` accordingly).
+- If a record's stored hash matches neither legacy nor canonical, the repair will propose a canonical rewrite (it logs a warning for manual inspection).
+- Blank lines are preserved in repairs.
+- The repair process is deterministic: once applied, future runs should show no changes for repaired files.
+- The tool writes a small preview of up to the first changed lines; always inspect `.repair` files before applying to avoid surprises.
+
+Safety & backups
+- Dry-run mode is non-destructive: it only writes `.repair` sidecar files.
+- Apply mode creates backups (`.bak`) of both the original journal file and the `.hash` anchor (if present). It attempts to restore from the backup if a write fails.
+- Nevertheless, keep an independent backup of your `~/.tt` directory if your journal data is critical — applying repairs changes on-disk hashes and should be done deliberately.
+
+Examples
+- Dry-run (inspect what would change):
+  ```bash
+  tt audit repair
+  ls -l ~/.tt/journal/**/2025-10-07.jsonl*
+  diff -u ~/.tt/journal/2025/10/2025-10-07.jsonl ~/.tt/journal/2025/10/2025-10-07.jsonl.repair
+  ```
+- Apply repairs (with backup):
+  ```bash
+  tt audit repair --dry-run=false --apply=true
+  # originals moved to .bak, anchors to .hash.bak if present
+  tt audit verify
+  ```
+
+If you'd like, I can:
+- Add an interactive confirmation prompt before apply,
+- Add a `--backup-dir` option so all backups/repairs are gathered in one place,
+- Add unit tests and CI checks for the repair/migration behavior.
+
+Tell me which of the above you prefer and I’ll implement it.
