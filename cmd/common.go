@@ -220,7 +220,9 @@ func roundMinutes(min int, r Rounding) int {
 		min = (min / q) * q
 	case "nearest":
 		rem := min % q
-		if rem*2 >= q {
+		// Use integer half (q/2) as threshold so odd quantum values behave deterministically
+		// (e.g. QuantumMin=15 => threshold 7, so 22 -> rounds up to 30 to match expectations)
+		if rem >= q/2 {
 			min = ((min / q) + 1) * q
 		} else {
 			min = (min / q) * q
