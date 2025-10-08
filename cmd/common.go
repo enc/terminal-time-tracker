@@ -13,6 +13,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"tt/internal/journal"
 )
 
 type Event struct {
@@ -105,82 +107,43 @@ func nowLocal() time.Time {
 }
 
 // Materialize entries from events for a given date range
+// Refactored to use the internal/journal parser to centralize parsing logic.
 func loadEntries(from, to time.Time) ([]Entry, error) {
 	// Normalize to local day boundaries
 	from = time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
 	to = time.Date(to.Year(), to.Month(), to.Day(), 23, 59, 59, 0, to.Location())
 
-	var events []Event
+	// Create a journal parser using configured timezone (falls back to Local inside the parser).
+	p := journal.NewParser(viper.GetString("timezone"))
+
+	var entries []Entry
 	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
-		p := journalPathFor(d)
-		b, err := os.ReadFile(p)
+		pth := journalPathFor(d)
+		ents, err := p.ParseFile(pth)
 		if err != nil {
+			// Preserve previous behaviour of skipping missing/malformed files in non-strict mode.
 			continue
 		}
-		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-			if strings.TrimSpace(line) == "" {
-				continue
+		// Map journal.Entry -> cmd.Entry
+		for _, je := range ents {
+			e := Entry{
+				ID:       je.ID,
+				Start:    je.Start,
+				End:      je.End,
+				Customer: je.Customer,
+				Project:  je.Project,
+				Activity: je.Activity,
+				Billable: je.Billable,
+				Notes:    je.Notes,
+				Tags:     je.Tags,
 			}
-			var ev Event
-			if err := json.Unmarshal([]byte(line), &ev); err == nil {
-				events = append(events, ev)
-			}
+			entries = append(entries, e)
 		}
 	}
-	sort.Slice(events, func(i, j int) bool { return events[i].TS.Before(events[j].TS) })
 
-	// Reconstruct entries
-	var entries []Entry
-	var current *Entry
-	for _, ev := range events {
-		switch ev.Type {
-		case "start":
-			if current != nil {
-				// auto-stop previous at this event ts
-				cur := ev.TS
-				current.End = &cur
-				entries = append(entries, *current)
-			}
-			billable := true
-			if ev.Billable != nil {
-				billable = *ev.Billable
-			}
-			current = &Entry{
-				ID: ev.ID, Start: ev.TS, Customer: ev.Customer, Project: ev.Project,
-				Activity: ev.Activity, Billable: billable,
-				Notes: []string{}, Tags: ev.Tags,
-			}
-			if ev.Note != "" {
-				current.Notes = append(current.Notes, ev.Note)
-			}
-		case "note":
-			if current != nil {
-				current.Notes = append(current.Notes, ev.Note)
-			}
-		case "stop":
-			if current != nil {
-				cur := ev.TS
-				current.End = &cur
-				entries = append(entries, *current)
-				current = nil
-			}
-		case "add":
-			billable := true
-			if ev.Billable != nil {
-				billable = *ev.Billable
-			}
-			// ev.Ref is "startISO..endISO"
-			parts := strings.Split(ev.Ref, "..")
-			if len(parts) == 2 {
-				st, _ := time.Parse(time.RFC3339, parts[0])
-				en, _ := time.Parse(time.RFC3339, parts[1])
-				entries = append(entries, Entry{
-					ID: ev.ID, Start: st, End: &en, Customer: ev.Customer, Project: ev.Project,
-					Activity: ev.Activity, Billable: billable, Notes: []string{ev.Note}, Tags: ev.Tags,
-				})
-			}
-		}
-	}
+	// Ensure deterministic ordering across days
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Start.Before(entries[j].Start) })
+
 	return entries, nil
 }
 

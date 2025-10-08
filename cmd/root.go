@@ -55,16 +55,44 @@ func initConfig() {
 }
 
 func mustParseTimeLocal(s string) time.Time {
-	// Accept ISO8601 or YYYY-MM-DDTHH:MM (assume local)
-	if t, err := time.Parse(time.RFC3339, s); err == nil { return t }
-	if t, err := time.Parse("2006-01-02T15:04", s); err == nil {
-		tz := viper.GetString("timezone")
-		loc, err := time.LoadLocation(tz)
-		if err == nil {
-			return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), 0, 0, loc)
-		}
+	// Try RFC3339 first (accepts explicit timezone)
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t
 	}
+
+	// Load configured timezone (fall back to local if unavailable)
+	tz := viper.GetString("timezone")
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		loc = time.Local
+	}
+
+	// Accept full date+time without timezone (T separator)
+	if t, err := time.ParseInLocation("2006-01-02T15:04:05", s, loc); err == nil {
+		return t
+	}
+	if t, err := time.ParseInLocation("2006-01-02T15:04", s, loc); err == nil {
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), 0, 0, loc)
+	}
+
+	// Accept space-separated date+time (with and without seconds)
+	if t, err := time.ParseInLocation("2006-01-02 15:04:05", s, loc); err == nil {
+		return t
+	}
+	if t, err := time.ParseInLocation("2006-01-02 15:04", s, loc); err == nil {
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), 0, 0, loc)
+	}
+
+	// Accept time-only inputs and assume today's date in configured location
+	if t, err := time.ParseInLocation("15:04:05", s, loc); err == nil {
+		now := time.Now().In(loc)
+		return time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), t.Second(), 0, loc)
+	}
+	if t, err := time.ParseInLocation("15:04", s, loc); err == nil {
+		now := time.Now().In(loc)
+		return time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, loc)
+	}
+
 	cobra.CheckErr(fmt.Errorf("cannot parse time: %s", s))
 	return time.Now()
 }

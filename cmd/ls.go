@@ -24,11 +24,15 @@ var lsCmd = &cobra.Command{
 		fmt.Printf("Range: %s..%s\n\n", from.Format("2006-01-02"), to.Format("2006-01-02"))
 		for _, e := range entries {
 			end := "running"
-			if e.End != nil { end = e.End.Format("15:04") }
+			if e.End != nil {
+				end = e.End.Format("15:04")
+			}
 			fmt.Printf("%s  %s-%s  %-8s  %-20s  %-20s  billable=%v  %s\n",
 				e.Start.Format("2006-01-02"), e.Start.Format("15:04"), end,
 				e.Activity, e.Customer, e.Project, e.Billable, fmtHHMM(durationMinutes(e)))
-			if len(e.Notes) > 0 { fmt.Printf("    notes: %v\n", e.Notes) }
+			if len(e.Notes) > 0 {
+				fmt.Printf("    notes: %v\n", e.Notes)
+			}
 		}
 	},
 }

@@ -20,14 +20,20 @@ var startCmd = &cobra.Command{
 	Args:  cobra.MaximumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		cust, proj := "", ""
-		if len(args) > 0 { cust = args[0] }
-		if len(args) > 1 { proj = args[1] }
+		if len(args) > 0 {
+			cust = args[0]
+		}
+		if len(args) > 1 {
+			proj = args[1]
+		}
 		id := fmt.Sprintf("tt_%d", time.Now().UnixNano())
 		billable := boolPtr(startBillable)
-		ev := Event{ ID: id, Type: "start", TS: nowLocal(), Customer: cust, Project: proj,
+		ev := Event{ID: id, Type: "start", TS: nowLocal(), Customer: cust, Project: proj,
 			Activity: startActivity, Billable: billable, Note: startNote, Tags: startTags,
 		}
-		if err := writeEvent(ev); err != nil { cobra.CheckErr(err) }
+		if err := writeEvent(ev); err != nil {
+			cobra.CheckErr(err)
+		}
 		fmt.Printf("Started: %s %s [%s] billable=%v\n", cust, proj, startActivity, *billable)
 	},
 }

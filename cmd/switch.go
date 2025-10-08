@@ -20,16 +20,22 @@ var switchCmd = &cobra.Command{
 	Args:  cobra.MaximumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		// stop
-		_ = writeEvent(Event{ ID: fmt.Sprintf("tt_%d", time.Now().UnixNano()), Type: "stop", TS: nowLocal() })
+		_ = writeEvent(Event{ID: fmt.Sprintf("tt_%d", time.Now().UnixNano()), Type: "stop", TS: nowLocal()})
 		// start
 		cust, proj := "", ""
-		if len(args) > 0 { cust = args[0] }
-		if len(args) > 1 { proj = args[1] }
+		if len(args) > 0 {
+			cust = args[0]
+		}
+		if len(args) > 1 {
+			proj = args[1]
+		}
 		id := fmt.Sprintf("tt_%d", time.Now().UnixNano())
 		billable := boolPtr(switchBillable)
-		ev := Event{ ID: id, Type: "start", TS: nowLocal(), Customer: cust, Project: proj,
-			Activity: switchActivity, Billable: billable, Note: switchNote, Tags: switchTags }
-		if err := writeEvent(ev); err != nil { cobra.CheckErr(err) }
+		ev := Event{ID: id, Type: "start", TS: nowLocal(), Customer: cust, Project: proj,
+			Activity: switchActivity, Billable: billable, Note: switchNote, Tags: switchTags}
+		if err := writeEvent(ev); err != nil {
+			cobra.CheckErr(err)
+		}
 		fmt.Printf("Switched to: %s %s [%s] billable=%v\n", cust, proj, switchActivity, *billable)
 	},
 }
