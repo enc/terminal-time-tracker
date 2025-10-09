@@ -24,6 +24,22 @@ go build -o tt .
 ./tt --help
 ```
 
+## TUI (experimental)
+
+Launch the terminal UI built with Bubble Tea:
+
+```bash
+./tt tui
+```
+
+What you'll see in this initial version:
+- A live clock.
+- Active session (if running) and the most recent closed entry from the last 7 days.
+- Quit with q, Esc, or Ctrl-C.
+
+Notes:
+- Auto-refresh on external journal changes will be added in the next step. The view updates every second.
+
 ## Quick demo
 ```bash
 ./tt start acme mobilize:foundation -a design -n "Subnet layout"
