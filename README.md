@@ -32,13 +32,19 @@ Launch the terminal UI built with Bubble Tea:
 ./tt tui
 ```
 
-What you'll see in this initial version:
-- A live clock.
+What you'll see:
+- A live clock, lipgloss-styled header/footer/sections, and auto-refresh when journal files change (watches ~/.tt/journal).
 - Active session (if running) and the most recent closed entry from the last 7 days.
-- Quit with q, Esc, or Ctrl-C.
+
+Keybindings:
+- space: start/stop current timer (uses last entry context if no active session)
+- n: enter note mode; type to edit; Enter to save; Esc to cancel
+- s: open start/switch form (↑/↓ select, Enter apply, b toggle billable, Esc cancel)
+- q, Esc, Ctrl-C: quit
 
 Notes:
-- Auto-refresh on external journal changes will be added in the next step. The view updates every second.
+- The dashboard updates every second and also refreshes immediately on file changes.
+- Styling uses lipgloss; for best results, use a terminal with truecolor support and appropriate background theme.
 
 ## Quick demo
 ```bash

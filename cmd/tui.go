@@ -23,14 +23,14 @@ import (
 // - Add a timeline and command palette
 var tuiCmd = &cobra.Command{
 	Use:   "tui",
-	Short: "Interactive terminal UI",
-	Long:  "Launch the interactive Bubble Tea TUI for tt (status dashboard and future timeline/report views).",
+	Short: "Interactive terminal UI (space: start/stop, n: note, q/Esc: quit)",
+	Long:  "Launch the Bubble Tea TUI for tt. Dashboard with live status; auto-refresh on journal changes. Keys: space=start/stop, n=note, q/Esc=quit.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Step 1: Wire the internal TUI app model with stubbed services.
 		svcs := ui.Services{
 			Journal: stubJournal{},
 			Writer:  stubWriter{},
-			Watch:   nil, // no file watcher yet; the UI still ticks and can be refreshed later
+			Watch:   ui.NewFSNotifyJournalWatch("", 0),
 			Config:  stubConfig{},
 		}
 		m := ui.NewAppModel(svcs)
