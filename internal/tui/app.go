@@ -227,6 +227,13 @@ type dashboardModel struct {
 	formMode bool
 	form     *formModel
 
+	// Timeline view state (toggleable via key)
+	showTimelines     bool
+	timelineWeekStart time.Time
+	timelineEntries   []Entry
+	timelineLoaded    bool
+	timelineErr       error
+
 	status string // simple transient status line (e.g., errors)
 }
 
@@ -292,6 +299,13 @@ func (d dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 		}
 		return d, nil
 
+	case weekLoadedMsg:
+		// Weekly entries loaded for the timelines view.
+		d.timelineEntries = msg.entries
+		d.timelineErr = msg.err
+		d.timelineLoaded = true
+		return d, nil
+
 	case tea.KeyMsg:
 		// Note input mode: scoped handling
 		if d.noteMode {
@@ -350,6 +364,56 @@ func (d dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 		case "s":
 			// Open start/switch form with quick suggestions
 			d.openForm()
+			return d, nil
+		case "t":
+			// Toggle timelines view. When enabling, load entries for the week starting on Monday.
+			if !d.showTimelines {
+				// pick timezone and compute weekStart at Monday midnight
+				tz := d.svcs.Config.Timezone()
+				if tz == nil {
+					tz = time.Local
+				}
+				today := time.Now().In(tz)
+				weekStart := startOfWeekMonday(today)
+				d.timelineWeekStart = weekStart
+				d.timelineLoaded = false
+				d.timelineErr = nil
+				d.showTimelines = true
+				return d, loadWeekEntries(d.svcs.Journal, weekStart)
+			}
+			// hide timelines
+			d.showTimelines = false
+			return d, nil
+		case "h", "<":
+			// When timelines are visible, move to previous week.
+			if d.showTimelines {
+				d.timelineWeekStart = d.timelineWeekStart.AddDate(0, 0, -7)
+				d.timelineLoaded = false
+				d.timelineErr = nil
+				return d, loadWeekEntries(d.svcs.Journal, d.timelineWeekStart)
+			}
+			return d, nil
+		case "l", ">":
+			// When timelines are visible, move to next week (but prevent moving into future weeks).
+			if d.showTimelines {
+				tz := d.svcs.Config.Timezone()
+				if tz == nil {
+					tz = time.Local
+				}
+				// Candidate week is the next week's Monday.
+				candidate := d.timelineWeekStart.AddDate(0, 0, 7)
+				// Do not allow navigating to a week that starts after the current week (Monday of now).
+				currentWeekStart := startOfWeekMonday(time.Now().In(tz))
+				if candidate.After(currentWeekStart) {
+					// Avoid navigation into the future. Provide a brief status hint.
+					d.status = RenderStatus("warn", "Cannot navigate into future weeks")
+					return d, nil
+				}
+				d.timelineWeekStart = candidate
+				d.timelineLoaded = false
+				d.timelineErr = nil
+				return d, loadWeekEntries(d.svcs.Journal, d.timelineWeekStart)
+			}
 			return d, nil
 		default:
 			return d, nil
@@ -431,6 +495,29 @@ func (d dashboardModel) View() string {
 		statusLine = "\n" + d.status
 	}
 
+	// If the timelines view is toggled on, render it instead of the quick suggestions.
+	if d.showTimelines {
+		body := ""
+		if !d.timelineLoaded {
+			body = SectionBoxStyle.Render("Loading timelines…")
+		} else if d.timelineErr != nil {
+			body = SectionBoxStyle.Render(fmt.Sprintf("Error loading timelines: %v", d.timelineErr))
+		} else {
+			tz := d.svcs.Config.Timezone()
+			if tz == nil {
+				tz = time.Local
+			}
+			// Compute week range for the header: Monday → Sunday
+			weekStart := d.timelineWeekStart.In(tz)
+			weekEnd := d.timelineWeekStart.AddDate(0, 0, 6).In(tz)
+			weekRange := fmt.Sprintf("%s → %s", weekStart.Format("2006-01-02"), weekEnd.Format("2006-01-02"))
+			// Render a compact week-range header above the timeline section.
+			rangeHeader := SectionTitleStyle.Render("Week: "+weekRange) + "\n"
+			body = rangeHeader + RenderWeekTimeline(d.timelineEntries, d.timelineWeekStart, tz, d.width)
+		}
+		return activeSec + "\n" + lastSec + "\n" + body + statusLine
+	}
+
 	return activeSec + "\n" + lastSec + "\n" + extra + statusLine
 }
 
@@ -450,10 +537,23 @@ func (d dashboardModel) hints() []Hint {
 			{Key: "Esc", Text: "cancel"},
 		}
 	}
+	if d.showTimelines {
+		// When timelines are visible, expose navigation keys.
+		return []Hint{
+			{Key: "space", Text: "start/stop"},
+			{Key: "n", Text: "note"},
+			{Key: "s", Text: "start/switch"},
+			{Key: "t", Text: "timelines"},
+			{Key: "h / <", Text: "prev week"},
+			{Key: "l / >", Text: "next week"},
+			{Key: "q", Text: "quit"},
+		}
+	}
 	return []Hint{
 		{Key: "space", Text: "start/stop"},
 		{Key: "n", Text: "note"},
 		{Key: "s", Text: "start/switch"},
+		{Key: "t", Text: "timelines"},
 		{Key: "q", Text: "quit"},
 	}
 }
@@ -471,6 +571,12 @@ type statusLoadedMsg struct {
 type startDoneMsg struct{ err error }
 type stopDoneMsg struct{ err error }
 type noteSavedMsg struct{ err error }
+
+// weekLoadedMsg is emitted when weekly entries have been loaded for timelines.
+type weekLoadedMsg struct {
+	entries []Entry
+	err     error
+}
 
 func tickEvery(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(t time.Time) tea.Msg { return tickMsg(t) })
@@ -501,6 +607,19 @@ func loadStatus(j JournalService) tea.Cmd {
 		from := now.AddDate(0, 0, -7)
 		active, last, err := j.FindActiveAndLast(context.Background(), from, now)
 		return statusLoadedMsg{active: active, last: last, err: err}
+	}
+}
+
+// loadWeekEntries loads entries for the 7-day window starting at weekStart.
+func loadWeekEntries(j JournalService, weekStart time.Time) tea.Cmd {
+	return func() tea.Msg {
+		if j == nil {
+			return weekLoadedMsg{entries: nil, err: nil}
+		}
+		from := weekStart
+		to := from.AddDate(0, 0, 7)
+		ents, err := j.LoadEntries(context.Background(), from, to)
+		return weekLoadedMsg{entries: ents, err: err}
 	}
 }
 
@@ -802,4 +921,25 @@ func backspace(s string) string {
 	}
 	_, size := utf8.DecodeLastRuneInString(s)
 	return s[:len(s)-size]
+}
+
+// startOfWeekMonday returns the time at midnight on Monday for the week that
+// contains t (in t's location). If t is already on Monday at midnight, that
+// exact moment is returned.
+func startOfWeekMonday(t time.Time) time.Time {
+	loc := t.Location()
+	// normalize to midnight of the given day
+	day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+	wd := day.Weekday()
+	// Calculate how many days to subtract to get to Monday.
+	// In Go, time.Monday == 1, time.Sunday == 0.
+	var daysBack int
+	if wd == time.Sunday {
+		// Sunday -> go back 6 days to previous Monday
+		daysBack = 6
+	} else {
+		// e.g., Tuesday (2) -> back 1 to reach Monday (1)
+		daysBack = int(wd) - int(time.Monday)
+	}
+	return day.AddDate(0, 0, -daysBack)
 }
