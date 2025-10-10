@@ -12,6 +12,7 @@ var (
 	startBillable bool
 	startTags     []string
 	startNote     string
+	startAt       string
 )
 
 var startCmd = &cobra.Command{
@@ -26,9 +27,14 @@ var startCmd = &cobra.Command{
 		if len(args) > 1 {
 			proj = args[1]
 		}
+		// Determine timestamp: either provided via --at or now in configured timezone
+		ts := nowLocal()
+		if startAt != "" {
+			ts = mustParseTimeLocal(startAt)
+		}
 		id := fmt.Sprintf("tt_%d", time.Now().UnixNano())
 		billable := boolPtr(startBillable)
-		ev := Event{ID: id, Type: "start", TS: nowLocal(), Customer: cust, Project: proj,
+		ev := Event{ID: id, Type: "start", TS: ts, Customer: cust, Project: proj,
 			Activity: startActivity, Billable: billable, Note: startNote, Tags: startTags,
 		}
 		if err := writeEvent(ev); err != nil {
@@ -43,4 +49,5 @@ func init() {
 	startCmd.Flags().BoolVarP(&startBillable, "billable", "b", true, "mark as billable (default true)")
 	startCmd.Flags().StringSliceVarP(&startTags, "tag", "t", []string{}, "add tag(s)")
 	startCmd.Flags().StringVarP(&startNote, "note", "n", "", "note for this entry")
+	startCmd.Flags().StringVar(&startAt, "at", "", "custom start time (accepts same formats as 'add')")
 }
