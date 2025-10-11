@@ -589,37 +589,77 @@ func weekdayLabelFor(wd time.Weekday, locale string) string {
 }
 
 func printTableReport(from, to time.Time, tz string, days []outDay, weekTotal int64, quantumSec int64, overlaps []string, badEntries []string) {
-	// Header
-	fmt.Printf("Woche %s (%s–%s) · %s\n\n", fmtWeekLabel(from, to), from.Format("02.01.2006"), to.Format("02.01.2006"), tz)
+	// ANSI color codes (subtle palette suitable for dark backgrounds)
+	const (
+		colReset  = "\x1b[0m"
+		colBold   = "\x1b[1m"
+		colDim    = "\x1b[2m"
+		colBlue   = "\x1b[36m"   // cyan accent
+		colGreen  = "\x1b[32m"   // green for totals
+		colYellow = "\x1b[90m"   // subtle gray for subtotals
+		colRed    = "\x1b[2;31m" // dim red for alerts
+	)
+
+	// Header (bold blue)
+	fmt.Printf("%s%sWoche %s%s  %s\n\n", colBold, colBlue, fmtWeekLabel(from, to), colReset, tz)
 	totalHours := float64(weekTotal) / 3600.0
+
+	// Column widths for table-like layout
+	const labelWidth = 30
+	const hoursWidth = 7
+
 	for _, d := range days {
-		// Weekday short and date
-		fmt.Printf("%s %s\n", d.Weekday, d.Date)
+		// Day header: bold
+		fmt.Printf("%s%s %s%s\n", colBold, d.Weekday, d.Date, colReset)
+
+		// If no groups, print a friendly empty hint
+		if len(d.Groups) == 0 {
+			fmt.Printf("  %s(no entries)%s\n", colDim, colReset)
+		}
+
 		for _, g := range d.Groups {
 			hours := float64(g.Seconds) / 3600.0
-			// simple formatted line: "  Customer / Project   3.5 h   - note1; note2"
-			proj := g.Project
-			if proj != "" {
-				fmt.Printf("  %s / %s\t%.2fh\t- %s\n", g.Customer, proj, hours, g.NotesMerged)
-			} else {
-				fmt.Printf("  %s\t%.2fh\t- %s\n", g.Customer, hours, g.NotesMerged)
+			// Compose left label: "Customer / Project" or "(unknown)"
+			label := g.Customer
+			if g.Project != "" {
+				label = fmt.Sprintf("%s / %s", g.Customer, g.Project)
+			}
+			// Truncate label if too long
+			if len(label) > labelWidth-2 {
+				label = label[:labelWidth-5] + "..."
+			}
+			// Colored customer/project label, hours in green, notes dimmed
+			fmt.Printf("  %s%-*s%s %s%*.2fh%s\n", colBlue, labelWidth, label, colReset, colGreen, hoursWidth, hours, colReset)
+			// Notes (wrapped are already produced by mergeNotesForDisplay); show on next line indented and dim
+			if g.NotesMerged != "" {
+				// indent notes block
+				lines := strings.Split(g.NotesMerged, "\n")
+				for _, ln := range lines {
+					fmt.Printf("    %s- %s%s\n", colDim, ln, colReset)
+				}
 			}
 		}
+
+		// Day subtotal: bold yellow; mark overlap if present
 		dayHours := float64(d.DaySeconds) / 3600.0
-		flagMarker := ""
+		overlapMark := ""
 		if len(d.Flags) > 0 {
-			flagMarker = "  ! overlap"
+			overlapMark = fmt.Sprintf(" %s! overlap%s", colRed, colReset)
 		}
-		fmt.Printf("\n  Tagessumme\t%.2fh%s\n\n", dayHours, flagMarker)
+		fmt.Printf("\n  %sTagessumme:%s %s%*.2fh%s%s\n\n", colBold, colReset, colYellow, hoursWidth, dayHours, colReset, overlapMark)
 	}
-	fmt.Printf("Wochensumme:\t%.2fh\n", totalHours)
+
+	// Weekly total emphasized
+	fmt.Printf("%sWochensumme:%s %s%.2fh%s\n", colBold, colReset, colGreen, totalHours, colReset)
+
+	// Footer hints: overlaps and data issues, colored
 	if len(overlaps) > 0 || len(badEntries) > 0 {
-		fmt.Println("Hinweise:")
+		fmt.Printf("\n%sHinweise:%s\n", colBold, colReset)
 		for _, o := range overlaps {
-			fmt.Printf("  ! overlap: %s\n", o)
+			fmt.Printf("  %s! overlap:%s %s\n", colRed, colReset, o)
 		}
 		if len(badEntries) > 0 {
-			fmt.Printf("  Data issues: %d entries\n", len(badEntries))
+			fmt.Printf("  %sData issues:%s %d entries\n", colYellow, colReset, len(badEntries))
 			for _, be := range badEntries {
 				fmt.Printf("    - %s\n", be)
 			}
