@@ -271,10 +271,15 @@ func (f *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return f, nil
 
 	case tea.KeyMsg:
+		// Debug: optional raw KeyMsg logging. Enable by setting TT_DEBUG_KEYS in env.
+		if os.Getenv("TT_DEBUG_KEYS") != "" {
+			// Print Type (enum), reported String(), and rune slice content to stderr.
+			fmt.Fprintf(os.Stderr, "DEBUG KeyMsg received: Type=%v String=%q Runes=%#v\n", msg.Type, msg.String(), msg.Runes)
+		}
 		// If the match list is open, route keys to it first so the user can
 		// navigate/select matches with ↑/↓ and Enter; Esc closes the list.
 		if f.listOpen {
-			switch msg.String() {
+			switch keyName(msg) {
 			case "enter":
 				// Accept selected item into the focused input.
 				if it := f.matchList.SelectedItem(); it != nil {
@@ -301,14 +306,17 @@ func (f *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		switch msg.String() {
+		// Map incoming KeyMsg to a normalized string so we reliably handle keys
+		// even if Terminfo or platform differences change msg.String() values.
+		k := keyName(msg)
+
+		switch k {
 		case "tab", "shift+tab", "enter", "up", "k", "down", "j", "ctrl+space":
 			// Handle navigation/focus cycling and open visible completion list on ctrl+space.
-			s := msg.String()
 
 			// If ctrl+space triggered completion for the focused field, handle it by
 			// building a ranked candidate list and opening the visible dropdown.
-			if s == "ctrl+space" {
+			if k == "ctrl+space" {
 				// If focused on customer
 				if f.focused == 0 {
 					prefix := strings.ToLower(strings.TrimSpace(f.customerInput.Value()))
@@ -316,8 +324,10 @@ func (f *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// If no prefix matches, try contains for short prefixes (1-2 chars),
 					// then fuzzy matches as a fallback, and finally top candidates.
 					if len(matches) == 0 {
-						if prefix != "" && len(prefix) <= 2 {
-							matches = filterContains(f.custCandidates, prefix)
+						if prefix != "" {
+							if len(prefix) <= 2 {
+								matches = filterContains(f.custCandidates, prefix)
+							}
 						}
 					}
 					if len(matches) == 0 && prefix != "" {
@@ -327,6 +337,23 @@ func (f *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						// fallback to showing top candidates
 						matches = filterPrefix(f.custCandidates, "")
 					}
+
+					// If there are still no matches but we have suggestion data, fall
+					// back to using the suggestion customer names so completion shows useful items.
+					if len(matches) == 0 && len(f.custCandidates) == 0 && len(f.suggestions) > 0 {
+						seen := map[string]struct{}{}
+						for _, s := range f.suggestions {
+							if s.Customer == "" {
+								continue
+							}
+							if _, ok := seen[s.Customer]; ok {
+								continue
+							}
+							seen[s.Customer] = struct{}{}
+							matches = append(matches, s.Customer)
+						}
+					}
+
 					if len(matches) > 0 {
 						f.matchList.SetItems(itemsFromStrings(matches))
 						// size: width ~ 1/3 of screen, height = min(10,len(matches))
@@ -351,6 +378,22 @@ func (f *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if len(matches) == 0 {
 						matches = filterPrefix(f.projCandidates, "")
 					}
+
+					// Fallback to suggestions' project names when candidate list is empty.
+					if len(matches) == 0 && len(f.projCandidates) == 0 && len(f.suggestions) > 0 {
+						seen := map[string]struct{}{}
+						for _, s := range f.suggestions {
+							if s.Project == "" {
+								continue
+							}
+							if _, ok := seen[s.Project]; ok {
+								continue
+							}
+							seen[s.Project] = struct{}{}
+							matches = append(matches, s.Project)
+						}
+					}
+
 					if len(matches) > 0 {
 						f.matchList.SetItems(itemsFromStrings(matches))
 						h := min(10, len(matches))
@@ -362,24 +405,24 @@ func (f *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// If Enter pressed and focused on last field, submit.
-			if s == "enter" && f.focused == len(f.inputs)-1 {
+			if k == "enter" && f.focused == len(f.inputs)-1 {
 				// Submit
 				return f, f.submitCmd()
 			}
 
 			// Tab / shift+tab navigation
-			if s == "tab" || s == "down" || s == "j" {
+			if k == "tab" || k == "down" || k == "j" {
 				f.focusNext()
 				return f, nil
 			}
-			if s == "shift+tab" || s == "up" || s == "k" {
+			if k == "shift+tab" || k == "up" || k == "k" {
 				f.focusPrev()
 				return f, nil
 			}
 			return f, nil
 
 		case "esc":
-			// Cancel the form. Emit a no-op command; caller should handle formMode exit.
+			// Cancel the form. Emit a message the dashboard can observe to close the form.
 			return f, func() tea.Msg { return formCancelledMsg{} }
 
 		case "ctrl+c":
@@ -725,6 +768,27 @@ func itemsFromStrings(in []string) []list.Item {
 
 type formCancelledMsg struct{}
 
+// weekLoadedMsg is emitted when weekly entries have been loaded for timelines.
+type weekLoadedMsg struct {
+	entries []Entry
+	err     error
+}
+
+// loadWeekEntries loads entries for the 7-day window starting at weekStart.
+// It is defined here so the form/dashboard can trigger week loads; the
+// implementation delegates to the JournalService.
+func loadWeekEntries(j JournalService, weekStart time.Time) tea.Cmd {
+	return func() tea.Msg {
+		if j == nil {
+			return weekLoadedMsg{entries: nil, err: nil}
+		}
+		from := weekStart
+		to := from.AddDate(0, 0, 7)
+		ents, err := j.LoadEntries(context.Background(), from, to)
+		return weekLoadedMsg{entries: ents, err: err}
+	}
+}
+
 // Methods to let callers configure/run the form submodel.
 func (f *formModel) SetMode(m string)          { f.mode = m }
 func (f *formModel) SetDefaultBillable(b bool) { f.defaultBill = b }
@@ -736,3 +800,51 @@ func (f *formModel) SetWriter(w EventWriter)   { f.writer = w }
 
 // Duplicate max helper removed from this file.
 // Use the shared max() helper defined in internal/tui/style.go instead.
+
+// keyName normalizes a tea.KeyMsg into a canonical string used by the form
+// input handling logic. Different terminals/terminfo databases sometimes
+// produce variations in key.String(), so using a small helper ensures
+// consistent behavior for Esc, Ctrl+Space, arrow keys, Tab variants, etc.
+//
+// Note: some terminals report Ctrl+Space as a NUL rune (rune(0)). To avoid
+// relying on a Key constant that may not be defined across bubbletea
+// versions, detect Ctrl+Space by inspecting runes when available.
+func keyName(k tea.KeyMsg) string {
+	// Detect Ctrl+Space via runes (many terminals emit a NUL rune for Ctrl+Space).
+	if k.Type == tea.KeyRunes {
+		if len(k.Runes) > 0 && k.Runes[0] == 0 {
+			return "ctrl+space"
+		}
+	}
+
+	// Some terminals/platforms report Ctrl+Space as ctrl+@; normalize that to ctrl+space.
+	// Also accept raw string variants if reported differently.
+	if k.String() == "ctrl+@" || k.String() == "\x00" {
+		return "ctrl+space"
+	}
+
+	// Prefer explicit mapping of known Key types for consistency.
+	switch k.Type {
+	case tea.KeyEsc:
+		return "esc"
+	case tea.KeyTab:
+		return "tab"
+	case tea.KeyShiftTab:
+		return "shift+tab"
+	case tea.KeyUp:
+		return "up"
+	case tea.KeyDown:
+		return "down"
+	case tea.KeyLeft:
+		return "left"
+	case tea.KeyRight:
+		return "right"
+	case tea.KeyEnter:
+		return "enter"
+	case tea.KeyCtrlC:
+		return "ctrl+c"
+	default:
+		// Fall back to the reported string (useful for letters like "j","k", etc.)
+		return k.String()
+	}
+}
