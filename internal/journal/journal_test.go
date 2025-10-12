@@ -428,3 +428,240 @@ func TestParseReader_AmendSplitMerge(t *testing.T) {
 		t.Fatalf("mg1 notes should include merge note, got: %#v", mg.Notes)
 	}
 }
+
+// Additional tests to exercise correction behaviour: idempotency of merges, deterministic ordering,
+// and that totals remain consistent before/after corrections.
+
+func TestMergeIdempotency(t *testing.T) {
+	// Create two base entries mA and mB and two merge events that attempt to merge them twice.
+	input := strings.Join([]string{
+		`{"id":"mA","type":"add","ts":"2025-02-01T09:00:00Z","ref":"2025-02-01T09:00:00Z..2025-02-01T10:00:00Z","customer":"X","project":"p"}`,
+		`{"id":"mB","type":"add","ts":"2025-02-01T10:00:00Z","ref":"2025-02-01T10:00:00Z..2025-02-01T11:00:00Z","customer":"X","project":"p"}`,
+		// first merge (should produce mg)
+		`{"id":"mg","type":"merge","ts":"2025-02-01T12:00:00Z","meta":{"targets":"mA,mB"},"note":"first"}`,
+		// second merge targeting the same ids (later timestamp) - should be a no-op because targets removed
+		`{"id":"mg2","type":"merge","ts":"2025-02-01T13:00:00Z","meta":{"targets":"mA,mB"},"note":"second"}`,
+	}, "\n")
+
+	p := NewParser("")
+	ents, err := p.ParseReader(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ParseReader error: %v", err)
+	}
+	// Expect only one merged entry mg and no mA/mB
+	ids := map[string]bool{}
+	for _, e := range ents {
+		ids[e.ID] = true
+	}
+	if !ids["mg"] {
+		t.Fatalf("expected merged entry mg present")
+	}
+	if ids["mg2"] {
+		t.Fatalf("mg2 should not produce a second merged entry")
+	}
+	if ids["mA"] || ids["mB"] {
+		t.Fatalf("mA/mB should be removed after merge")
+	}
+}
+
+func TestCorrections_OrderingDeterministic(t *testing.T) {
+	// Ensure that corrections are applied in chronological order regardless of input order.
+	// We'll craft two inputs with the same events in different orders but same timestamps and expect same result.
+	base := []string{
+		`{"id":"x1","type":"add","ts":"2025-03-10T08:00:00Z","ref":"2025-03-10T08:00:00Z..2025-03-10T10:00:00Z","customer":"C","project":"P"}`,
+	}
+	// amend then split (amend ts earlier than split)
+	eventsA := []string{
+		`{"id":"amx","type":"amend","ts":"2025-03-10T10:00:00Z","ref":"x1","note":"amended","meta":{"start":"2025-03-10T08:15:00Z"}}`,
+		`{"id":"spx","type":"split","ts":"2025-03-10T11:00:00Z","ref":"x1","meta":{"split_at":"2025-03-10T09:00:00Z","left_note":"L","right_note":"R"}}`,
+	}
+	// same events but in reverse order (split appears before amend in the file)
+	eventsB := []string{
+		`{"id":"spx","type":"split","ts":"2025-03-10T11:00:00Z","ref":"x1","meta":{"split_at":"2025-03-10T09:00:00Z","left_note":"L","right_note":"R"}}`,
+		`{"id":"amx","type":"amend","ts":"2025-03-10T10:00:00Z","ref":"x1","note":"amended","meta":{"start":"2025-03-10T08:15:00Z"}}`,
+	}
+
+	inputA := strings.Join(append(base, eventsA...), "\n")
+	inputB := strings.Join(append(base, eventsB...), "\n")
+
+	p := NewParser("")
+	entsA, err := p.ParseReader(strings.NewReader(inputA))
+	if err != nil {
+		t.Fatalf("ParseReader A error: %v", err)
+	}
+	entsB, err := p.ParseReader(strings.NewReader(inputB))
+	if err != nil {
+		t.Fatalf("ParseReader B error: %v", err)
+	}
+
+	// Normalize by mapping id->entry and comparing windows and notes for expected derived ids.
+	mapA := map[string]Entry{}
+	for _, e := range entsA {
+		mapA[e.ID] = e
+	}
+	mapB := map[string]Entry{}
+	for _, e := range entsB {
+		mapB[e.ID] = e
+	}
+
+	// Both should contain split outputs spx.L and spx.R and an amended start applied to the left part.
+	aLeft, aLok := mapA["spx.L"]
+	bLeft, bLok := mapB["spx.L"]
+	if !aLok || !bLok {
+		t.Fatalf("expected spx.L present in both parses")
+	}
+	// Compare starts first
+	if !aLeft.Start.Equal(bLeft.Start) {
+		t.Fatalf("left split start mismatch between parses: A %v B %v", aLeft.Start, bLeft.Start)
+	}
+	// Safely compare optional end times
+	if (aLeft.End == nil) != (bLeft.End == nil) {
+		t.Fatalf("left split end nil mismatch between parses: A %v B %v", aLeft.End, bLeft.End)
+	}
+	if aLeft.End != nil && bLeft.End != nil {
+		if !(*aLeft.End).Equal(*bLeft.End) {
+			t.Fatalf("left split end mismatch between parses: A %v B %v", *aLeft.End, *bLeft.End)
+		}
+	}
+	// The left split should reflect the amended start (08:15)
+	if !aLeft.Start.Equal(mustParse(t, "2025-03-10T08:15:00Z")) {
+		t.Fatalf("expected amended start applied to left split, got %v", aLeft.Start)
+	}
+}
+
+func TestReportingTotalsBeforeAfterCorrections(t *testing.T) {
+	// Build base entries: a1 (08:00-09:00), a2 (09:00-11:00)
+	// Apply a split on a2 and a merge of a1 with one of resulting parts; totals should remain identical.
+	base := []string{
+		`{"id":"a1","type":"add","ts":"2025-04-01T08:00:00Z","ref":"2025-04-01T08:00:00Z..2025-04-01T09:00:00Z","customer":"X","project":"p"}`,
+		`{"id":"a2","type":"add","ts":"2025-04-01T09:00:00Z","ref":"2025-04-01T09:00:00Z..2025-04-01T11:00:00Z","customer":"X","project":"p"}`,
+	}
+	corrections := []string{
+		// split a2 into 09:00..10:00 and 10:00..11:00
+		`{"id":"sp","type":"split","ts":"2025-04-01T12:00:00Z","ref":"a2","meta":{"split_at":"2025-04-01T10:00:00Z","left_note":"part1","right_note":"part2"}}`,
+		// merge a1 and sp.L into mg (consolidation) - note this should not change total time
+		`{"id":"mg","type":"merge","ts":"2025-04-01T13:00:00Z","meta":{"targets":"a1,sp.L"},"note":"consol"}`,
+	}
+
+	// Parse base-only to compute baseline total
+	baseInput := strings.Join(base, "\n")
+	p := NewParser("")
+	baseEntries, err := p.ParseReader(strings.NewReader(baseInput))
+	if err != nil {
+		t.Fatalf("ParseReader base error: %v", err)
+	}
+	totalBase := 0
+	for _, e := range baseEntries {
+		if e.End != nil {
+			totalBase += int(e.End.Sub(e.Start).Minutes())
+		}
+	}
+
+	// Parse base+corrections to compute post-correction total
+	allInput := strings.Join(append(base, corrections...), "\n")
+	allEntries, err := p.ParseReader(strings.NewReader(allInput))
+	if err != nil {
+		t.Fatalf("ParseReader all error: %v", err)
+	}
+	totalAfter := 0
+	for _, e := range allEntries {
+		if e.End != nil {
+			totalAfter += int(e.End.Sub(e.Start).Minutes())
+		}
+	}
+
+	if totalBase != totalAfter {
+		t.Fatalf("expected totals unchanged by corrections, before=%d after=%d", totalBase, totalAfter)
+	}
+}
+
+// Edge case: amend an open (running) entry. The amend should be able to set an end time
+// and update metadata for an entry created by a `start` event that lacks a stop.
+func TestAmendOpenEntry(t *testing.T) {
+	input := strings.Join([]string{
+		// running start (no stop)
+		`{"id":"r1","type":"start","ts":"2025-05-01T08:00:00Z","project":"p","activity":"dev"}`,
+		// amend the running entry to add an end and change project
+		`{"id":"amr","type":"amend","ts":"2025-05-01T12:00:00Z","ref":"r1","project":"p2","meta":{"end":"2025-05-01T11:00:00Z"}}`,
+	}, "\n")
+
+	p := NewParser("")
+	ents, err := p.ParseReader(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ParseReader error: %v", err)
+	}
+	if len(ents) != 1 {
+		t.Fatalf("expected 1 entry after amend, got %d", len(ents))
+	}
+	e := ents[0]
+	if e.Project != "p2" {
+		t.Fatalf("expected project amended to p2, got %q", e.Project)
+	}
+	if e.End == nil || !e.End.Equal(mustParse(t, "2025-05-01T11:00:00Z")) {
+		t.Fatalf("expected end set by amend to 11:00, got %v", e.End)
+	}
+}
+
+// Edge case: split at exact boundaries must be rejected (split_at must be strictly between start and end).
+func TestSplitAtBoundaries(t *testing.T) {
+	// ab1 is 09:00..10:00
+	base := `{"id":"ab1","type":"add","ts":"2025-06-01T09:00:00Z","ref":"2025-06-01T09:00:00Z..2025-06-01T10:00:00Z","project":"p"}`
+	// attempt split at start boundary
+	spStart := `{"id":"spb1","type":"split","ts":"2025-06-01T11:00:00Z","ref":"ab1","meta":{"split_at":"2025-06-01T09:00:00Z"}}`
+	// attempt split at end boundary
+	spEnd := `{"id":"spb2","type":"split","ts":"2025-06-01T11:05:00Z","ref":"ab1","meta":{"split_at":"2025-06-01T10:00:00Z"}}`
+
+	// Non-strict parser should ignore these invalid splits and keep the original entry
+	input := strings.Join([]string{base, spStart, spEnd}, "\n")
+	p := NewParser("")
+	ents, err := p.ParseReader(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ParseReader non-strict error: %v", err)
+	}
+	if len(ents) != 1 {
+		t.Fatalf("expected original entry preserved when splits at boundaries ignored, got %d entries", len(ents))
+	}
+
+	// Strict mode should error when encountering invalid split_at
+	pStrict := NewParser("")
+	pStrict.Strict = true
+	_, err = pStrict.ParseReader(strings.NewReader(input))
+	if err == nil {
+		t.Fatalf("expected error in strict mode for splits at boundaries")
+	}
+	var pe *ParseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("expected ParseError in strict mode for invalid split_at, got %T: %v", err, err)
+	}
+}
+
+// Edge case: merge with missing targets in strict mode should cause an error; non-strict skips it.
+func TestMergeMissingTargetsStrictMode(t *testing.T) {
+	// base entry mX
+	base := `{"id":"mX","type":"add","ts":"2025-07-01T09:00:00Z","ref":"2025-07-01T09:00:00Z..2025-07-01T10:00:00Z"}`
+	// merge referencing non-existent ids foo,bar
+	mergeEv := `{"id":"mErr","type":"merge","ts":"2025-07-01T12:00:00Z","meta":{"targets":"foo,bar"}}`
+
+	// Non-strict parser should skip the problematic merge (no error) and keep base entry
+	input := strings.Join([]string{base, mergeEv}, "\n")
+	p := NewParser("")
+	ents, err := p.ParseReader(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("expected non-strict parser to skip bad merge, got error: %v", err)
+	}
+	if len(ents) != 1 || ents[0].ID != "mX" {
+		t.Fatalf("expected base entry preserved when merge targets missing in non-strict mode, got: %+v", ents)
+	}
+
+	// Strict parser should return a ParseError when merge targets missing
+	ps := NewParser("")
+	ps.Strict = true
+	_, err = ps.ParseReader(strings.NewReader(input))
+	if err == nil {
+		t.Fatalf("expected strict parser to error on merge with missing targets")
+	}
+	var pe *ParseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("expected ParseError for missing merge targets in strict mode, got %T: %v", err, err)
+	}
+}
