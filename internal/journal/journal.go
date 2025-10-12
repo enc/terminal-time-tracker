@@ -498,6 +498,43 @@ func applyCorrections(p *Parser, path string, base []Entry, corrections []Event)
 				}
 				continue
 			}
+
+			// Harden validation: disallow merging entries that span different customers or projects
+			// unless the merge event explicitly provides an override (ev.Customer/ev.Project).
+			// We treat only differing non-empty values as a conflict; if all are empty or identical it's fine.
+			if ev.Customer == "" {
+				custSet := map[string]struct{}{}
+				for _, e := range found {
+					if e.Customer != "" {
+						custSet[e.Customer] = struct{}{}
+					}
+				}
+				if len(custSet) > 1 {
+					pe := &ParseError{Path: path, Err: fmt.Errorf("merge targets have conflicting customers; provide an override via event customer")}
+					if p.Strict {
+						return nil, pe
+					}
+					// In non-strict mode, skip the problematic merge
+					continue
+				}
+			}
+			if ev.Project == "" {
+				projSet := map[string]struct{}{}
+				for _, e := range found {
+					if e.Project != "" {
+						projSet[e.Project] = struct{}{}
+					}
+				}
+				if len(projSet) > 1 {
+					pe := &ParseError{Path: path, Err: fmt.Errorf("merge targets have conflicting projects; provide an override via event project")}
+					if p.Strict {
+						return nil, pe
+					}
+					// In non-strict mode, skip the problematic merge
+					continue
+				}
+			}
+
 			// compute min start and max end
 			minStart := found[0].Start
 			var maxEnd *time.Time

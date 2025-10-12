@@ -665,3 +665,82 @@ func TestMergeMissingTargetsStrictMode(t *testing.T) {
 		t.Fatalf("expected ParseError for missing merge targets in strict mode, got %T: %v", err, err)
 	}
 }
+
+// Validate merges across customers/projects: ensure merges that span differing customers or
+// projects are rejected unless the merge event provides explicit overrides. Test both non-strict
+// (skip problematic merge) and strict (error) behaviours, and verify that explicit overrides succeed.
+func TestMergeValidationCustomerProject(t *testing.T) {
+	// Two base entries with different customers and projects
+	base := []string{
+		`{"id":"eA","type":"add","ts":"2025-08-01T09:00:00Z","ref":"2025-08-01T09:00:00Z..2025-08-01T10:00:00Z","customer":"CustA","project":"Proj1"}`,
+		`{"id":"eB","type":"add","ts":"2025-08-01T10:00:00Z","ref":"2025-08-01T10:00:00Z..2025-08-01T11:00:00Z","customer":"CustB","project":"Proj2"}`,
+	}
+	// Merge without overrides should be problematic
+	mergeBad := `{"id":"mBad","type":"merge","ts":"2025-08-01T12:00:00Z","meta":{"targets":"eA,eB"},"note":"attempt bad merge"}`
+	inputBad := strings.Join(append(base, mergeBad), "\n")
+
+	// Non-strict parser should skip the problematic merge and keep original entries
+	p := NewParser("")
+	ents, err := p.ParseReader(strings.NewReader(inputBad))
+	if err != nil {
+		t.Fatalf("expected non-strict parser to skip cross-customer/project merge, got error: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, e := range ents {
+		ids[e.ID] = true
+	}
+	if !ids["eA"] || !ids["eB"] {
+		t.Fatalf("expected original entries preserved when merge conflicts and non-strict mode, got: %+v", ents)
+	}
+	if ids["mBad"] {
+		t.Fatalf("merge event without overrides should not produce merged entry in non-strict mode")
+	}
+
+	// Strict parser should error on merge with conflicting customers/projects
+	ps := NewParser("")
+	ps.Strict = true
+	_, err = ps.ParseReader(strings.NewReader(inputBad))
+	if err == nil {
+		t.Fatalf("expected strict parser to error on merge with conflicting customers/projects")
+	}
+	var pe *ParseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("expected ParseError in strict mode for conflicting merge targets, got %T: %v", err, err)
+	}
+
+	// Now test that providing explicit override customer/project on the merge allows it to proceed
+	mergeGood := `{"id":"mGood","type":"merge","ts":"2025-08-01T13:00:00Z","customer":"UnifiedCust","project":"UnifiedProj","meta":{"targets":"eA,eB"},"note":"merge with overrides"}`
+	inputGood := strings.Join(append(base, mergeGood), "\n")
+
+	// Non-strict parser should accept the override and produce merged entry
+	p2 := NewParser("")
+	ents2, err := p2.ParseReader(strings.NewReader(inputGood))
+	if err != nil {
+		t.Fatalf("unexpected error parsing merge with overrides: %v", err)
+	}
+	foundMerged := false
+	foundA := false
+	foundB := false
+	for _, e := range ents2 {
+		if e.ID == "mGood" {
+			foundMerged = true
+			// merged metadata should reflect override
+			if e.Customer != "UnifiedCust" || e.Project != "UnifiedProj" {
+				t.Fatalf("merged entry did not inherit override customer/project: got %q/%q", e.Customer, e.Project)
+			}
+		}
+		if e.ID == "eA" {
+			foundA = true
+		}
+		if e.ID == "eB" {
+			foundB = true
+		}
+	}
+	if !foundMerged {
+		t.Fatalf("expected merged entry mGood present when overrides provided")
+	}
+	// original targets should be removed from effective view
+	if foundA || foundB {
+		t.Fatalf("expected original targets removed after successful merge with overrides; got A=%v B=%v", foundA, foundB)
+	}
+}
