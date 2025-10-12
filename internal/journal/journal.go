@@ -16,7 +16,7 @@ import (
 // This mirrors the structure used across the repository for journal files.
 type Event struct {
 	ID       string            `json:"id"`
-	Type     string            `json:"type"` // start|stop|add|amend|pause|resume|note
+	Type     string            `json:"type"` // start|stop|add|amend|split|merge|pause|resume|note
 	TS       time.Time         `json:"ts"`
 	User     string            `json:"user,omitempty"`
 	Customer string            `json:"customer,omitempty"`
@@ -25,7 +25,7 @@ type Event struct {
 	Billable *bool             `json:"billable,omitempty"`
 	Note     string            `json:"note,omitempty"`
 	Tags     []string          `json:"tags,omitempty"`
-	Ref      string            `json:"ref,omitempty"` // e.g. "startISO..endISO" for add events
+	Ref      string            `json:"ref,omitempty"` // e.g. "startISO..endISO" for add events or target entry id for amend/split
 	Meta     map[string]string `json:"meta,omitempty"`
 	PrevHash string            `json:"prev_hash,omitempty"`
 	Hash     string            `json:"hash,omitempty"`
@@ -119,6 +119,9 @@ func (p *Parser) ParseReader(r io.Reader) ([]Entry, error) {
 }
 
 // parseReaderWithPath is the internal implementation that can attach a path to ParseErrors.
+// This implementation is append-only friendly: it collects base events (start/stop/add/notes)
+// and also collects correction events (amend/split/merge). After building base entries it applies
+// corrections in chronological order to produce the effective view without mutating historical events.
 func (p *Parser) parseReaderWithPath(r io.Reader, path string) ([]Entry, error) {
 	if p == nil {
 		p = NewParser("")
@@ -151,8 +154,12 @@ func (p *Parser) parseReaderWithPath(r io.Reader, path string) ([]Entry, error) 
 	// Sort events chronologically to ensure deterministic reconstruction.
 	sort.Slice(events, func(i, j int) bool { return events[i].TS.Before(events[j].TS) })
 
-	var entries []Entry
+	var baseEntries []Entry
 	var current *Entry
+
+	// collect correction events to apply after base reconstruction
+	var corrections []Event
+
 	for _, ev := range events {
 		switch ev.Type {
 		case "start":
@@ -160,7 +167,7 @@ func (p *Parser) parseReaderWithPath(r io.Reader, path string) ([]Entry, error) 
 				// auto-stop previous at this event timestamp
 				cur := ev.TS
 				current.End = &cur
-				entries = append(entries, *current)
+				baseEntries = append(baseEntries, *current)
 			}
 			billable := true
 			if ev.Billable != nil {
@@ -187,7 +194,7 @@ func (p *Parser) parseReaderWithPath(r io.Reader, path string) ([]Entry, error) 
 			if current != nil {
 				cur := ev.TS
 				current.End = &cur
-				entries = append(entries, *current)
+				baseEntries = append(baseEntries, *current)
 				current = nil
 			}
 		case "add":
@@ -200,7 +207,7 @@ func (p *Parser) parseReaderWithPath(r io.Reader, path string) ([]Entry, error) 
 				st, err1 := time.Parse(time.RFC3339, parts[0])
 				en, err2 := time.Parse(time.RFC3339, parts[1])
 				if err1 == nil && err2 == nil {
-					entries = append(entries, Entry{
+					baseEntries = append(baseEntries, Entry{
 						ID:       ev.ID,
 						Start:    st,
 						End:      &en,
@@ -224,13 +231,365 @@ func (p *Parser) parseReaderWithPath(r io.Reader, path string) ([]Entry, error) 
 					return nil, pe
 				}
 			}
-		// other event types are ignored by reconstruction (amend, pause, resume, etc.)
+		case "amend", "split", "merge":
+			// collect and apply later
+			corrections = append(corrections, ev)
 		default:
-			// no-op
+			// ignore other event types (pause/resume etc.)
 		}
 	}
 
-	return entries, nil
+	// if a start is still open at EOF, keep it open (no end)
+	if current != nil {
+		baseEntries = append(baseEntries, *current)
+	}
+
+	// apply corrections (amend/split/merge) in chronological order
+	finalEntries, err := applyCorrections(p, path, baseEntries, corrections)
+	if err != nil {
+		return nil, err
+	}
+
+	// sort final entries by start time for deterministic output
+	sort.Slice(finalEntries, func(i, j int) bool {
+		return finalEntries[i].Start.Before(finalEntries[j].Start)
+	})
+
+	return finalEntries, nil
+}
+
+// applyCorrections applies append-only correction events to a slice of base entries.
+// Supported correction semantics:
+//
+//   - amend: ev.Ref should hold the target entry ID (or meta["target"]). Fields present
+//     on the amend event override the target's fields (customer,project,activity,billable).
+//     Meta keys "start" and "end" may contain RFC3339 times to adjust boundaries.
+//     ev.Note, ev.Tags will be appended/replaced respectively.
+//
+//   - split: ev.Ref identifies the target entry. Meta "split_at" must be an RFC3339 time
+//     strictly between the target start and end. Two new entries are created with IDs
+//     derived from ev.ID (suffixes ".L" and ".R"). Optional meta keys "left_note" and
+//     "right_note" are attached. The original target entry is removed from the effective view.
+//
+//   - merge: meta["targets"] contains a comma-separated list of entry IDs to merge.
+//     A new entry with ID ev.ID is created spanning min(start) .. max(end) of targets.
+//     Targets are removed from the effective view. ev.Customer/Project/Activity/Billable
+//     override if present; otherwise first non-empty from targets is used. Notes are concatenated.
+//
+// Errors encountered while parsing correction metadata will cause ParseError when p.Strict=true,
+// otherwise problematic correction events are skipped.
+func applyCorrections(p *Parser, path string, base []Entry, corrections []Event) ([]Entry, error) {
+	// build map id -> *Entry for easy updates; copy values so we can take addresses
+	entryMap := make(map[string]*Entry, len(base))
+	for i := range base {
+		e := base[i] // copy
+		entryMap[e.ID] = &e
+	}
+
+	// helper to remove an id from map
+	removeIDs := func(ids []string) {
+		for _, id := range ids {
+			delete(entryMap, id)
+		}
+	}
+
+	// apply corrections in order
+	for _, ev := range corrections {
+		switch ev.Type {
+		case "amend":
+			target := ev.Ref
+			if target == "" && ev.Meta != nil {
+				target = ev.Meta["target"]
+			}
+			if target == "" {
+				pe := &ParseError{Path: path, Err: errors.New("amend event missing target")}
+				if p.Strict {
+					return nil, pe
+				}
+				continue
+			}
+			ent, ok := entryMap[target]
+			if !ok {
+				// nothing to amend
+				pe := &ParseError{Path: path, Err: fmt.Errorf("amend target not found: %s", target)}
+				if p.Strict {
+					return nil, pe
+				}
+				continue
+			}
+			// apply time adjustments from meta
+			if ev.Meta != nil {
+				if s, ok := ev.Meta["start"]; ok && s != "" {
+					if t, err := time.Parse(time.RFC3339, s); err == nil {
+						ent.Start = t
+					} else if p.Strict {
+						return nil, &ParseError{Path: path, Err: err}
+					}
+				}
+				if e, ok := ev.Meta["end"]; ok && e != "" {
+					if t, err := time.Parse(time.RFC3339, e); err == nil {
+						ent.End = &t
+					} else if p.Strict {
+						return nil, &ParseError{Path: path, Err: err}
+					}
+				}
+			}
+			// override metadata fields if present on amend event
+			if ev.Customer != "" {
+				ent.Customer = ev.Customer
+			}
+			if ev.Project != "" {
+				ent.Project = ev.Project
+			}
+			if ev.Activity != "" {
+				ent.Activity = ev.Activity
+			}
+			if ev.Billable != nil {
+				ent.Billable = *ev.Billable
+			}
+			// tags: if non-empty, replace; otherwise keep existing
+			if len(ev.Tags) > 0 {
+				ent.Tags = ev.Tags
+			}
+			// append note if provided
+			if ev.Note != "" {
+				ent.Notes = append(ent.Notes, ev.Note)
+			}
+		case "split":
+			target := ev.Ref
+			if target == "" && ev.Meta != nil {
+				target = ev.Meta["target"]
+			}
+			if target == "" {
+				pe := &ParseError{Path: path, Err: errors.New("split event missing target")}
+				if p.Strict {
+					return nil, pe
+				}
+				continue
+			}
+			ent, ok := entryMap[target]
+			if !ok {
+				pe := &ParseError{Path: path, Err: fmt.Errorf("split target not found: %s", target)}
+				if p.Strict {
+					return nil, pe
+				}
+				continue
+			}
+			if ent.End == nil {
+				pe := &ParseError{Path: path, Err: fmt.Errorf("split target has no end: %s", target)}
+				if p.Strict {
+					return nil, pe
+				}
+				continue
+			}
+			var splitAtStr string
+			if ev.Meta != nil {
+				splitAtStr = ev.Meta["split_at"]
+			}
+			if splitAtStr == "" {
+				pe := &ParseError{Path: path, Err: errors.New("split event missing split_at")}
+				if p.Strict {
+					return nil, pe
+				}
+				continue
+			}
+			splitAt, err := time.Parse(time.RFC3339, splitAtStr)
+			if err != nil {
+				if p.Strict {
+					return nil, &ParseError{Path: path, Err: err}
+				}
+				continue
+			}
+			if !(ent.Start.Before(splitAt) && splitAt.Before(*ent.End)) {
+				pe := &ParseError{Path: path, Err: fmt.Errorf("split_at not within entry bounds for target %s", target)}
+				if p.Strict {
+					return nil, pe
+				}
+				continue
+			}
+			// create left and right entries using ev.ID as base to avoid collisions
+			leftID := ev.ID + ".L"
+			rightID := ev.ID + ".R"
+
+			left := Entry{
+				ID:       leftID,
+				Start:    ent.Start,
+				End:      &splitAt,
+				Customer: ent.Customer,
+				Project:  ent.Project,
+				Activity: ent.Activity,
+				Billable: ent.Billable,
+				Notes:    []string{},
+				Tags:     ent.Tags,
+			}
+			right := Entry{
+				ID:       rightID,
+				Start:    splitAt,
+				End:      ent.End,
+				Customer: ent.Customer,
+				Project:  ent.Project,
+				Activity: ent.Activity,
+				Billable: ent.Billable,
+				Notes:    []string{},
+				Tags:     ent.Tags,
+			}
+			// allow overrides on split event
+			if ev.Customer != "" {
+				left.Customer = ev.Customer
+				right.Customer = ev.Customer
+			}
+			if ev.Project != "" {
+				left.Project = ev.Project
+				right.Project = ev.Project
+			}
+			if ev.Activity != "" {
+				left.Activity = ev.Activity
+				right.Activity = ev.Activity
+			}
+			if ev.Billable != nil {
+				left.Billable = *ev.Billable
+				right.Billable = *ev.Billable
+			}
+			// attach left/right notes from meta if provided, otherwise inherit none
+			if ev.Meta != nil {
+				if ln := ev.Meta["left_note"]; ln != "" {
+					left.Notes = append(left.Notes, ln)
+				}
+				if rn := ev.Meta["right_note"]; rn != "" {
+					right.Notes = append(right.Notes, rn)
+				}
+			}
+			// remove original and add new ones
+			removeIDs([]string{target})
+			entryMap[left.ID] = &left
+			entryMap[right.ID] = &right
+		case "merge":
+			// targets list must be in meta["targets"] as comma-separated ids
+			if ev.Meta == nil {
+				pe := &ParseError{Path: path, Err: errors.New("merge event missing targets")}
+				if p.Strict {
+					return nil, pe
+				}
+				continue
+			}
+			targStr := ev.Meta["targets"]
+			if targStr == "" {
+				pe := &ParseError{Path: path, Err: errors.New("merge event missing targets")}
+				if p.Strict {
+					return nil, pe
+				}
+				continue
+			}
+			parts := strings.Split(targStr, ",")
+			var found []*Entry
+			for _, tid := range parts {
+				tid = strings.TrimSpace(tid)
+				if tid == "" {
+					continue
+				}
+				if e, ok := entryMap[tid]; ok {
+					found = append(found, e)
+				}
+			}
+			if len(found) == 0 {
+				pe := &ParseError{Path: path, Err: fmt.Errorf("merge: no targets found for event %s", ev.ID)}
+				if p.Strict {
+					return nil, pe
+				}
+				continue
+			}
+			// compute min start and max end
+			minStart := found[0].Start
+			var maxEnd *time.Time
+			for _, e := range found {
+				if e.Start.Before(minStart) {
+					minStart = e.Start
+				}
+				if e.End != nil {
+					if maxEnd == nil || e.End.After(*maxEnd) {
+						// copy value
+						t := *e.End
+						maxEnd = &t
+					}
+				}
+			}
+			merged := Entry{
+				ID:       ev.ID,
+				Start:    minStart,
+				End:      maxEnd,
+				Customer: "",
+				Project:  "",
+				Activity: "",
+				Billable: false,
+				Notes:    []string{},
+				Tags:     []string{},
+			}
+			// choose metadata: event overrides, otherwise first non-empty from targets
+			if ev.Customer != "" {
+				merged.Customer = ev.Customer
+			} else {
+				for _, e := range found {
+					if e.Customer != "" {
+						merged.Customer = e.Customer
+						break
+					}
+				}
+			}
+			if ev.Project != "" {
+				merged.Project = ev.Project
+			} else {
+				for _, e := range found {
+					if e.Project != "" {
+						merged.Project = e.Project
+						break
+					}
+				}
+			}
+			if ev.Activity != "" {
+				merged.Activity = ev.Activity
+			} else {
+				for _, e := range found {
+					if e.Activity != "" {
+						merged.Activity = e.Activity
+						break
+					}
+				}
+			}
+			// billable: event override else any target billable true
+			if ev.Billable != nil {
+				merged.Billable = *ev.Billable
+			} else {
+				for _, e := range found {
+					if e.Billable {
+						merged.Billable = true
+						break
+					}
+				}
+			}
+			// combine notes and tags
+			for _, e := range found {
+				merged.Notes = append(merged.Notes, e.Notes...)
+				merged.Tags = append(merged.Tags, e.Tags...)
+			}
+			if ev.Note != "" {
+				merged.Notes = append(merged.Notes, ev.Note)
+			}
+			// remove targets and insert merged
+			var targetsToRemove []string
+			for _, e := range found {
+				targetsToRemove = append(targetsToRemove, e.ID)
+			}
+			removeIDs(targetsToRemove)
+			entryMap[merged.ID] = &merged
+		}
+	}
+
+	// produce final slice from map
+	var out []Entry
+	for _, e := range entryMap {
+		out = append(out, *e)
+	}
+	return out, nil
 }
 
 // ParseStream parses entries and returns a channel that emits entries as they are reconstructed.

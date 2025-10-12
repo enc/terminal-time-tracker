@@ -325,3 +325,106 @@ func TestTagsAndBillableDefaults(t *testing.T) {
 		t.Fatalf("second entry billable/tags mismatch: billable=%v tags=%#v", ents[1].Billable, ents[1].Tags)
 	}
 }
+
+func TestParseReader_AmendSplitMerge(t *testing.T) {
+	// This test exercises the append-only corrections: amend, split, merge.
+	// 1. add base entry e1 (08:00-09:00) and amend it (change metadata & bounds)
+	// 2. add base entry e2 (09:00-11:00) and split it into sp1.L and sp1.R at 10:00
+	// 3. add m1 (13:00-14:00) and m2 (14:00-15:00) and merge them into mg1
+	input := strings.Join([]string{
+		// base entries
+		`{"id":"e1","type":"add","ts":"2025-01-13T08:00:00Z","ref":"2025-01-13T08:00:00Z..2025-01-13T09:00:00Z","customer":"OrigCo","project":"origproj","activity":"work","billable":true,"note":"orig"}`,
+		`{"id":"e2","type":"add","ts":"2025-01-13T09:00:00Z","ref":"2025-01-13T09:00:00Z..2025-01-13T11:00:00Z","customer":"ACME","project":"portal","activity":"dev","billable":true}`,
+		`{"id":"m1","type":"add","ts":"2025-01-13T13:00:00Z","ref":"2025-01-13T13:00:00Z..2025-01-13T14:00:00Z","customer":"acme","project":"portal","activity":"ops"}`,
+		`{"id":"m2","type":"add","ts":"2025-01-13T14:00:00Z","ref":"2025-01-13T14:00:00Z..2025-01-13T15:00:00Z","customer":"acme","project":"portal","activity":"ops"}`,
+		// corrections: amend e1
+		`{"id":"am1","type":"amend","ts":"2025-01-13T11:00:00Z","ref":"e1","customer":"ACME2","project":"newproj","billable":false,"note":"Wrapped up deployment","meta":{"start":"2025-01-13T08:15:00Z","end":"2025-01-13T09:15:00Z"}}`,
+		// split e2 at 10:00 with left/right notes
+		`{"id":"sp1","type":"split","ts":"2025-01-13T12:00:00Z","ref":"e2","meta":{"split_at":"2025-01-13T10:00:00Z","left_note":"Before lunch","right_note":"After lunch"}}`,
+		// merge m1 and m2 into mg1
+		`{"id":"mg1","type":"merge","ts":"2025-01-13T16:00:00Z","note":"Consolidated work","meta":{"targets":"m1,m2"}}`,
+	}, "\n")
+
+	p := NewParser("")
+	ents, err := p.ParseReader(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ParseReader error: %v", err)
+	}
+
+	// Build a map of id->entry for assertions
+	m := make(map[string]Entry)
+	for _, e := range ents {
+		m[e.ID] = e
+	}
+
+	// Expect amended e1 to exist with updated bounds, metadata, billable=false and appended note
+	e1, ok := m["e1"]
+	if !ok {
+		t.Fatalf("expected amended entry e1 present")
+	}
+	if !e1.Start.Equal(mustParse(t, "2025-01-13T08:15:00Z")) {
+		t.Fatalf("e1 start not amended: %v", e1.Start)
+	}
+	if e1.End == nil || !e1.End.Equal(mustParse(t, "2025-01-13T09:15:00Z")) {
+		t.Fatalf("e1 end not amended: %v", e1.End)
+	}
+	if e1.Customer != "ACME2" || e1.Project != "newproj" {
+		t.Fatalf("e1 metadata not amended: %v %v", e1.Customer, e1.Project)
+	}
+	if e1.Billable {
+		t.Fatalf("e1 billable should be false after amend")
+	}
+	// notes: original "orig" + "Wrapped up deployment"
+	if len(e1.Notes) < 2 || e1.Notes[len(e1.Notes)-1] != "Wrapped up deployment" {
+		t.Fatalf("e1 notes expected appended amend note, got: %#v", e1.Notes)
+	}
+
+	// Expect split produced sp1.L and sp1.R and removed original e2
+	if _, exists := m["e2"]; exists {
+		t.Fatalf("original e2 should be removed after split")
+	}
+	left, lok := m["sp1.L"]
+	right, rok := m["sp1.R"]
+	if !lok || !rok {
+		t.Fatalf("expected sp1.L and sp1.R entries present, got L=%v R=%v", lok, rok)
+	}
+	if !left.Start.Equal(mustParse(t, "2025-01-13T09:00:00Z")) || left.End == nil || !left.End.Equal(mustParse(t, "2025-01-13T10:00:00Z")) {
+		t.Fatalf("sp1.L window incorrect: %v..%v", left.Start, left.End)
+	}
+	if !right.Start.Equal(mustParse(t, "2025-01-13T10:00:00Z")) || right.End == nil || !right.End.Equal(mustParse(t, "2025-01-13T11:00:00Z")) {
+		t.Fatalf("sp1.R window incorrect: %v..%v", right.Start, right.End)
+	}
+	// notes from split meta
+	if len(left.Notes) == 0 || left.Notes[0] != "Before lunch" {
+		t.Fatalf("sp1.L note missing or wrong: %#v", left.Notes)
+	}
+	if len(right.Notes) == 0 || right.Notes[0] != "After lunch" {
+		t.Fatalf("sp1.R note missing or wrong: %#v", right.Notes)
+	}
+
+	// Expect merged mg1 present and m1/m2 removed
+	if _, exists := m["m1"]; exists {
+		t.Fatalf("m1 should be removed after merge")
+	}
+	if _, exists := m["m2"]; exists {
+		t.Fatalf("m2 should be removed after merge")
+	}
+	mg, mek := m["mg1"]
+	if !mek {
+		t.Fatalf("merged mg1 missing")
+	}
+	if !mg.Start.Equal(mustParse(t, "2025-01-13T13:00:00Z")) || mg.End == nil || !mg.End.Equal(mustParse(t, "2025-01-13T15:00:00Z")) {
+		t.Fatalf("mg1 window incorrect: %v..%v", mg.Start, mg.End)
+	}
+	// merged note should include the merge note
+	found := false
+	for _, n := range mg.Notes {
+		if n == "Consolidated work" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("mg1 notes should include merge note, got: %#v", mg.Notes)
+	}
+}
