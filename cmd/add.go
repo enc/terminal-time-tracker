@@ -17,10 +17,24 @@ var (
 var addCmd = &cobra.Command{
 	Use:   "add <start> <end> [customer] [project]",
 	Short: "Add a past time entry (retro)",
-	Args:  cobra.RangeArgs(2, 4),
+	Args:  cobra.RangeArgs(1, 4),
 	Run: func(cmd *cobra.Command, args []string) {
-		st := mustParseTimeLocal(args[0])
-		en := mustParseTimeLocal(args[1])
+		// Parse a flexible range from the leading tokens. ParseFlexibleRange will consume
+		// combined tokens like `9-12`, `yesterday 09:00 10:30`, `13:00 +45m`, `now-30m`, etc.
+		st, en, consumed, err := ParseFlexibleRange(args, Now())
+		if err != nil {
+			cobra.CheckErr(err)
+		}
+
+		// If the flexible parser returned a start without an end, allow the next positional
+		// token to be the explicit end (preserves legacy `add <start> <end>` usage).
+		if en.IsZero() {
+			if len(args) <= consumed {
+				cobra.CheckErr(fmt.Errorf("end time is required"))
+			}
+			en = mustParseTimeLocal(args[consumed])
+			consumed++
+		}
 
 		// Validate range
 		if !en.After(st) {
@@ -28,11 +42,11 @@ var addCmd = &cobra.Command{
 		}
 
 		customer, project := "", ""
-		if len(args) > 2 {
-			customer = args[2]
+		if len(args) > consumed {
+			customer = args[consumed]
 		}
-		if len(args) > 3 {
-			project = args[3]
+		if len(args) > consumed+1 {
+			project = args[consumed+1]
 		}
 
 		id := IDGen()
