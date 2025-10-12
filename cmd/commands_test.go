@@ -166,7 +166,7 @@ func TestUniqueStringsAndProjectsForCustomer(t *testing.T) {
 	}
 	// non-existing customer should return nil or empty slice
 	px := projectsForCustomer("Nope")
-	if px != nil && len(px) != 0 {
+	if len(px) != 0 {
 		t.Fatalf("expected no projects for nonexistent customer, got %v", px)
 	}
 }
