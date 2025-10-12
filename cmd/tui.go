@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"time"
 
@@ -116,46 +115,23 @@ func (stubJournal) FindActiveAndLast(ctx context.Context, from, to time.Time) (*
 type stubWriter struct{}
 
 func (stubWriter) Start(ctx context.Context, p ui.StartParams) error {
-	id := fmt.Sprintf("tt_%d", time.Now().UnixNano())
-	ev := Event{
-		ID:       id,
-		Type:     "start",
-		TS:       nowLocal(),
-		Customer: p.Customer,
-		Project:  p.Project,
-		Activity: p.Activity,
-		Billable: boolPtr(p.Billable),
-		Note:     p.Note,
-		Tags:     p.Tags,
-	}
-	return writeEvent(ev)
+	ev := NewStartEvent(IDGen(), p.Customer, p.Project, p.Activity, boolPtr(p.Billable), p.Note, p.Tags, Now())
+	return Writer.WriteEvent(ev)
 }
 
 func (stubWriter) Stop(ctx context.Context) error {
-	id := fmt.Sprintf("tt_%d", time.Now().UnixNano())
-	return writeEvent(Event{ID: id, Type: "stop", TS: nowLocal()})
+	ev := NewStopEvent(IDGen(), Now())
+	return Writer.WriteEvent(ev)
 }
 
 func (stubWriter) Note(ctx context.Context, text string) error {
-	id := fmt.Sprintf("tt_%d", time.Now().UnixNano())
-	return writeEvent(Event{ID: id, Type: "note", TS: nowLocal(), Note: text})
+	ev := Event{ID: IDGen(), Type: "note", TS: Now(), Note: text}
+	return Writer.WriteEvent(ev)
 }
 
 func (stubWriter) Add(ctx context.Context, p ui.AddParams) error {
-	id := fmt.Sprintf("tt_%d", time.Now().UnixNano())
-	ev := Event{
-		ID:       id,
-		Type:     "add",
-		TS:       nowLocal(),
-		Customer: p.Customer,
-		Project:  p.Project,
-		Activity: p.Activity,
-		Billable: boolPtr(p.Billable),
-		Note:     p.Note,
-		Tags:     p.Tags,
-		Ref:      p.Start.Format(time.RFC3339) + ".." + p.End.Format(time.RFC3339),
-	}
-	return writeEvent(ev)
+	ev := NewAddEvent(IDGen(), p.Customer, p.Project, p.Activity, boolPtr(p.Billable), p.Note, p.Tags, p.Start, p.End)
+	return Writer.WriteEvent(ev)
 }
 
 func (w stubWriter) Switch(ctx context.Context, p ui.SwitchParams) error {

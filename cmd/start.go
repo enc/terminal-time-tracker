@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -20,27 +19,25 @@ var startCmd = &cobra.Command{
 	Short: "Start tracking time (creates a running entry)",
 	Args:  cobra.MaximumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
-		cust, proj := "", ""
+		customer, project := "", ""
 		if len(args) > 0 {
-			cust = args[0]
+			customer = args[0]
 		}
 		if len(args) > 1 {
-			proj = args[1]
+			project = args[1]
 		}
-		// Determine timestamp: either provided via --at or now in configured timezone
-		ts := nowLocal()
+		// Determine timestamp: either provided via --at or Now provider (injected for tests)
+		ts := Now()
 		if startAt != "" {
 			ts = mustParseTimeLocal(startAt)
 		}
-		id := fmt.Sprintf("tt_%d", time.Now().UnixNano())
+		id := IDGen()
 		billable := boolPtr(startBillable)
-		ev := Event{ID: id, Type: "start", TS: ts, Customer: cust, Project: proj,
-			Activity: startActivity, Billable: billable, Note: startNote, Tags: startTags,
-		}
+		ev := NewStartEvent(id, customer, project, startActivity, billable, startNote, startTags, ts)
 		if err := writeEvent(ev); err != nil {
 			cobra.CheckErr(err)
 		}
-		fmt.Printf("Started: %s %s [%s] billable=%v\n", cust, proj, startActivity, *billable)
+		fmt.Printf("Started: %s %s [%s] billable=%v\n", customer, project, startActivity, fmtBillable(billable))
 	},
 }
 

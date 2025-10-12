@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -19,24 +18,27 @@ var switchCmd = &cobra.Command{
 	Short: "Stop current and immediately start a new entry",
 	Args:  cobra.MaximumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
-		// stop
-		_ = writeEvent(Event{ID: fmt.Sprintf("tt_%d", time.Now().UnixNano()), Type: "stop", TS: nowLocal()})
+		// stop - ensure we handle any error
+		stopEv := NewStopEvent(IDGen(), Now())
+		if err := Writer.WriteEvent(stopEv); err != nil {
+			cobra.CheckErr(fmt.Errorf("failed to write stop event: %w", err))
+		}
+
 		// start
-		cust, proj := "", ""
+		customer, project := "", ""
 		if len(args) > 0 {
-			cust = args[0]
+			customer = args[0]
 		}
 		if len(args) > 1 {
-			proj = args[1]
+			project = args[1]
 		}
-		id := fmt.Sprintf("tt_%d", time.Now().UnixNano())
+		id := IDGen()
 		billable := boolPtr(switchBillable)
-		ev := Event{ID: id, Type: "start", TS: nowLocal(), Customer: cust, Project: proj,
-			Activity: switchActivity, Billable: billable, Note: switchNote, Tags: switchTags}
-		if err := writeEvent(ev); err != nil {
+		ev := NewStartEvent(id, customer, project, switchActivity, billable, switchNote, switchTags, Now())
+		if err := Writer.WriteEvent(ev); err != nil {
 			cobra.CheckErr(err)
 		}
-		fmt.Printf("Switched to: %s %s [%s] billable=%v\n", cust, proj, switchActivity, *billable)
+		fmt.Printf("Switched to: %s %s [%s] billable=%v\n", customer, project, switchActivity, fmtBillable(billable))
 	},
 }
 
