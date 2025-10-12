@@ -116,61 +116,8 @@ var reportCmd = &cobra.Command{
 			return keys[i].Activity < keys[j].Activity
 		})
 
-		// Print groups
-		for _, k := range keys {
-			v := agg[k]
-			// Group header line
-			parts := []string{}
-			if useBy["customer"] {
-				parts = append(parts, fmt.Sprintf("customer=%s", k.Customer))
-			}
-			if useBy["project"] {
-				parts = append(parts, fmt.Sprintf("project=%s", k.Project))
-			}
-			if useBy["activity"] {
-				parts = append(parts, fmt.Sprintf("activity=%s", k.Activity))
-			}
-			if useBy["billable"] {
-				parts = append(parts, fmt.Sprintf("billable=%v", k.Billable))
-			}
-			header := strings.Join(parts, " | ")
-			if header == "" {
-				header = "(ungrouped)"
-			}
-			fmt.Printf("=== Group: %s ===\n", header)
-
-			// If detailed, show per-entry lines
-			entryList := groupEntries[k]
-			if repDetailed {
-				// sort entries by start time
-				sort.Slice(entryList, func(i, j int) bool { return entryList[i].Start.Before(entryList[j].Start) })
-				for _, e := range entryList {
-					min := durationMinutes(e)
-					rmin := roundMinutes(min, r)
-					endStr := "(running)"
-					if e.End != nil {
-						endStr = e.End.Format("2006-01-02 15:04")
-					}
-					noteStr := "-"
-					if len(e.Notes) > 0 {
-						noteStr = strings.Join(e.Notes, " | ")
-					}
-					tags := ""
-					if len(e.Tags) > 0 {
-						tags = fmt.Sprintf(" tags=%v", e.Tags)
-					}
-					// Example line:
-					// - 2025-01-01 09:00 → 2025-01-01 11:30  (2h30m raw → 2h30m rounded +0m) tags=[x] Notes: some note
-					fmt.Printf(" - %s → %s  (%s raw → %s rounded %+dm)%s\n     Notes: %s\n",
-						e.Start.Format("2006-01-02 15:04"), endStr, fmtHHMM(min), fmtHHMM(rmin), rmin-min, tags, noteStr)
-				}
-				fmt.Printf("  Group total: Raw=%s  Rounded=%s  (+%dm)\n\n", fmtHHMM(v.RawMin), fmtHHMM(v.RoundedMin), v.RoundedMin-v.RawMin)
-			} else {
-				// concise summary
-				count := len(entryList)
-				fmt.Printf("  Entries: %d   Raw: %s   Rounded: %s (+%dm)\n\n", count, fmtHHMM(v.RawMin), fmtHHMM(v.RoundedMin), v.RoundedMin-v.RawMin)
-			}
-		}
+		// Print groups using helper for consistent week/day formatting
+		fmt.Print(formatGroups(agg, groupEntries, repDetailed))
 
 		// Overall total
 		fmt.Printf("TOTAL: %s raw → %s rounded (+%dm)\n", fmtHHMM(totalRaw), fmtHHMM(totalRounded), totalRounded-totalRaw)
