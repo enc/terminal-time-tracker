@@ -153,6 +153,28 @@ Below are recommended ways to use and install completions for each shell.
 - The Zsh automated installer adds lines to `~/.zshrc` only when it detects relevant lines are missing; it always asks for explicit confirmation before making changes.
 - The dynamic positional completion (customer/project suggestions) scans your journal files under `~/.tt/journal`. It's best-effort and tolerant of missing or unreadable files. If your journal is large and you notice latency in completion, consider manual installation of the completion script (the scanning only happens inside the shell completion runtime).
 
+- Alias-aware completion: `tt` supports named aliases (presets) which are persisted in `~/.tt/config.yaml`. Completion is aware of aliases in two ways:
+  - The `--alias` flag itself supports completion and will suggest defined alias names when you press TAB (e.g., `tt start --alias <TAB>`).
+  - When completing the positional `customer` or `project` arguments for `start` and `switch`, if you provide an `--alias <name>` and that alias contains a `customer` and/or `project`, those alias-provided values are included among the completion candidates (and are suggested first). This makes it convenient to use an alias while still being able to tab-complete or confirm the customer/project values the alias represents.
+
+Examples
+```bash
+# Define an alias (persists in ~/.tt/config.yaml)
+tt alias set dev --customer Acme --project Website --activity dev
+
+# The --alias flag will complete existing alias names:
+tt start --alias <TAB>   # suggests: dev ...
+
+# When completing the customer argument, the alias' customer is included:
+tt start --alias dev <TAB>    # suggests: Acme ... (and other customers from your journal)
+
+# When completing the project argument, the alias' project is preferred when the customer matches:
+tt start Acme <TAB>           # suggests: Website ... (and other projects seen for Acme)
+tt start --alias dev <TAB>    # if you omit customer, alias' customer/project are included in suggestions
+```
+
+Note: alias-aware completion works once you have installed the shell completion script for your shell (see earlier examples for Zsh/Bash/Fish/PowerShell). The completion logic is best-effort and safe: it will not remove other suggestions from the list; it only ensures alias-provided values appear among the candidates (often at the front) so they are easy to select.
+
 ## Security / Safety
 - Generated completion scripts are just shell scripts. Inspect them if you are concerned before sourcing or installing.
 - The `--install-zsh` helper modifies `~/.zshrc` only after asking for confirmation; it appends a clearly marked block so you can easily remove it later.

@@ -125,22 +125,84 @@ func init() {
 	startCmd.ValidArgsFunction = customerProjectValidArgs
 	switchCmd.ValidArgsFunction = customerProjectValidArgs
 	addCmd.ValidArgsFunction = addCmdValidArgs
+
+	// Register flag completion for --alias to suggest existing alias names.
+	// We ignore the returned error as registration should succeed in normal cobra usage;
+	// if the flag does not exist, registering will be a no-op.
+	_ = startCmd.RegisterFlagCompletionFunc("alias", aliasFlagCompletion)
+	_ = switchCmd.RegisterFlagCompletionFunc("alias", aliasFlagCompletion)
 }
 
 // customerProjectValidArgs completes first arg as customer and second arg as project.
+// When an --alias flag is present, suggestions will include the alias' customer/project
+// where appropriate so users can rely on alias-injected values for completion.
 func customerProjectValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	// No args -> complete customer
+	// Try to read the --alias flag value (if present). In completion contexts the flag
+	// may be set earlier on the command line; this helps us include alias-provided
+	// customer/project in suggestions.
+	var aliasName string
+	if cmd != nil {
+		if f := cmd.Flags(); f != nil {
+			if v, err := f.GetString("alias"); err == nil {
+				aliasName = strings.TrimSpace(v)
+			}
+		}
+	}
+
+	// No args -> complete customer. Include alias customer (if any) at the front.
 	if len(args) == 0 {
 		custs := uniqueStringsFromJournal("customer")
+		if aliasName != "" {
+			if a, ok := getAlias(aliasName); ok && a.Customer != "" {
+				found := false
+				for _, c := range custs {
+					if c == a.Customer {
+						found = true
+						break
+					}
+				}
+				if !found {
+					custs = append([]string{a.Customer}, custs...)
+				}
+			}
+		}
 		return filterPrefixAndSort(custs, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
-	// One arg -> complete project (prefer projects for given customer)
+
+	// One arg -> complete project (prefer projects for given customer).
+	// If the user didn't type a customer but provided --alias, use alias.Customer
+	// as context. Also include alias.Project (if present) among suggestions.
 	if len(args) == 1 {
 		cust := strings.TrimSpace(args[0])
 		var projs []string
+
+		// If customer not provided explicitly, and alias provides one, use it as context.
+		if cust == "" && aliasName != "" {
+			if a, ok := getAlias(aliasName); ok && a.Customer != "" {
+				cust = a.Customer
+			}
+		}
+
 		if cust != "" {
 			projs = projectsForCustomer(cust)
 		}
+
+		// If alias provides a specific project, prefer it by prepending it if missing.
+		if aliasName != "" {
+			if a, ok := getAlias(aliasName); ok && a.Project != "" {
+				found := false
+				for _, p := range projs {
+					if p == a.Project {
+						found = true
+						break
+					}
+				}
+				if !found {
+					projs = append([]string{a.Project}, projs...)
+				}
+			}
+		}
+
 		if len(projs) == 0 {
 			projs = uniqueStringsFromJournal("project")
 		}
@@ -301,4 +363,16 @@ func filterPrefixAndSort(list []string, prefix string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// aliasFlagCompletion provides shell completion suggestions for the --alias flag.
+// It returns the list of defined alias names filtered by the current prefix.
+func aliasFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// gather names
+	m := loadAliases()
+	names := make([]string, 0, len(m))
+	for k := range m {
+		names = append(names, k)
+	}
+	return filterPrefixAndSort(names, toComplete), cobra.ShellCompDirectiveNoFileComp
 }
