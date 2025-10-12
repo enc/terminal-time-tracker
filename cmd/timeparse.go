@@ -41,11 +41,22 @@ func ParseFlexibleRange(tokens []string, anchor time.Time) (start time.Time, end
 	// helper to consume n tokens and return error-wrapped
 	retErr := func(e error) (time.Time, time.Time, int, error) { return time.Time{}, time.Time{}, 0, e }
 
+	// Handle single-token duration (e.g. "+30m" or "45m"). For convenience we treat a
+	// lone duration as an anchor forward relative to `anchor` (consistent with "+45m"
+	// being a time offset). This keeps behavior predictable for CLI usage.
+	if len(tokens) == 1 && looksLikeDuration(tokens[0]) {
+		d, err := parseDuration(tokens[0])
+		if err != nil {
+			return retErr(err)
+		}
+		// Interpret "+30m" and "30m" as anchor + duration (start-only).
+		return anchor.Add(d), time.Time{}, 1, nil
+	}
+
 	// Pattern 1: single token that contains a dash (range shorthand) e.g., "9-12", "now-30m", "2h-now"
 	if strings.Contains(tokens[0], "-") {
 		s := tokens[0]
-		left, right := splitDashRange(s)
-		st, en, err := resolveDashRangeSides(left, right, anchor, loc)
+		st, en, err := resolveDashRangeToken(s, anchor, loc)
 		if err != nil {
 			return retErr(err)
 		}
@@ -72,24 +83,6 @@ func ParseFlexibleRange(tokens []string, anchor time.Time) (start time.Time, end
 		return st, en, 3, nil
 	}
 
-	// Pattern 3: two tokens that are both times (assume same day: today or date word preceding in shell)
-	if len(tokens) >= 2 && looksLikeTime(tokens[0]) && looksLikeTime(tokens[1]) {
-		// use anchor's date
-		date := anchor
-		st, err := parseTimeOfDay(tokens[0], date, loc)
-		if err != nil {
-			return retErr(fmt.Errorf("start time: %w", err))
-		}
-		en, err := parseTimeOfDay(tokens[1], date, loc)
-		if err != nil {
-			return retErr(fmt.Errorf("end time: %w", err))
-		}
-		if !en.After(st) {
-			return retErr(fmt.Errorf("end time must be after start time"))
-		}
-		return st, en, 2, nil
-	}
-
 	// Pattern 4: two tokens where second is a duration like "13:00 +45m"
 	if len(tokens) >= 2 && (looksLikeTime(tokens[0]) || isAbsoluteDate(tokens[0])) && looksLikeDuration(tokens[1]) {
 		var st time.Time
@@ -107,6 +100,24 @@ func ParseFlexibleRange(tokens []string, anchor time.Time) (start time.Time, end
 			return retErr(err)
 		}
 		en := st.Add(dur)
+		return st, en, 2, nil
+	}
+
+	// Pattern 3: two tokens that are both times (assume same day: today or date word preceding in shell)
+	if len(tokens) >= 2 && looksLikeTime(tokens[0]) && looksLikeTime(tokens[1]) {
+		// use anchor's date
+		date := anchor
+		st, err := parseTimeOfDay(tokens[0], date, loc)
+		if err != nil {
+			return retErr(fmt.Errorf("start time: %w", err))
+		}
+		en, err := parseTimeOfDay(tokens[1], date, loc)
+		if err != nil {
+			return retErr(fmt.Errorf("end time: %w", err))
+		}
+		if !en.After(st) {
+			return retErr(fmt.Errorf("end time must be after start time"))
+		}
 		return st, en, 2, nil
 	}
 
@@ -199,6 +210,28 @@ func resolveDashRangeSides(left, right string, anchor time.Time, loc *time.Locat
 	left = strings.TrimSpace(left)
 	right = strings.TrimSpace(right)
 
+	// Special-case common human-friendly forms involving "now" and a duration.
+	// - "now-30m" should mean: start = now - 30m, end = now
+	// - "2h-now" should mean: start = now - 2h, end = now
+	// This is distinct from the generic rule (left absolute + right duration -> left .. left+dur).
+	// We handle these up-front for intuitive UX.
+	if strings.EqualFold(left, "now") && looksLikeDuration(right) {
+		d, err := parseDuration(right)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid duration on right side: %w", err)
+		}
+		nowt := Now().In(loc)
+		return nowt.Add(-d), nowt, nil
+	}
+	if strings.EqualFold(right, "now") && looksLikeDuration(left) {
+		d, err := parseDuration(left)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid duration on left side: %w", err)
+		}
+		nowt := Now().In(loc)
+		return nowt.Add(-d), nowt, nil
+	}
+
 	// helper to parse a side which can be: "now", time of day, duration, absolute date/time, weekday, dateword
 	parseSide := func(tok string) (isDuration bool, t time.Time, dur time.Duration, err error) {
 		if tok == "" {
@@ -207,12 +240,15 @@ func resolveDashRangeSides(left, right string, anchor time.Time, loc *time.Locat
 		if tok == "now" {
 			return false, Now().In(loc), 0, nil
 		}
-		// Prefer interpreting tokens that look like times as time-of-day (handles "9", "09", "09:00")
+		// Prefer interpreting plain numeric tokens as times first (e.g. "9" -> 09:00) rather than durations.
 		if looksLikeTime(tok) {
 			tt, e := parseTimeOfDay(tok, anchor, loc)
 			return false, tt, 0, e
 		}
-		// Date-words / weekdays next
+		if looksLikeDuration(tok) {
+			d, e := parseDuration(tok)
+			return true, time.Time{}, d, e
+		}
 		if looksLikeDateWord(tok) || looksLikeWeekday(tok) {
 			date, e := resolveDateWord(tok, anchor, loc)
 			if e != nil {
@@ -220,11 +256,6 @@ func resolveDashRangeSides(left, right string, anchor time.Time, loc *time.Locat
 			}
 			// date without time -> midnight
 			return false, time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, loc), 0, nil
-		}
-		// Durations (\"+45m\", \"2h\", or plain integer minutes) after time/date heuristics
-		if looksLikeDuration(tok) {
-			d, e := parseDuration(tok)
-			return true, time.Time{}, d, e
 		}
 		// fallback to absolute parse (date or datetime)
 		tt, e := mustParseTimeFlexible(tok, loc)
@@ -285,26 +316,88 @@ func resolveDashRangeSides(left, right string, anchor time.Time, loc *time.Locat
 	return leftT, rightT, nil
 }
 
-// splitDashRange splits on the first dash not inside an ISO date (i.e., 2006-01-02).
-// A simple heuristic: if token contains 'T' or contains two '-' and looks like ISO date, we avoid splitting inside date.
-func splitDashRange(s string) (string, string) {
-	// Attempt to find a split position where both sides parse as absolute datetimes.
-	// This solves cases like "2025-10-10T09:00:00Z-2025-10-10T11:00:00Z".
-	// We'll try each '-' as a candidate separator and prefer the first candidate where both sides parse.
-	for i := 0; i < len(s); i++ {
-		if s[i] != '-' {
-			continue
-		}
-		left := strings.TrimSpace(s[:i])
-		right := strings.TrimSpace(s[i+1:])
-		// Try parsing both sides as absolute date/time using the flexible parser.
-		if _, errL := mustParseTimeFlexible(left, parserLocation()); errL == nil {
-			if _, errR := mustParseTimeFlexible(right, parserLocation()); errR == nil {
-				return left, right
+/*
+resolveDashRangeToken attempts to parse common dashed range forms quickly (now-anchored,
+time-only shorthands, and colon-separated time ranges) before falling back to the generic
+split-and-parse approach used by resolveDashRangeSides.
+
+This function handles:
+  - now-anchored patterns: "now-30m" or "2h-now" -> start = now - dur, end = now
+  - hour-only ranges: "9-12" -> interpret as 09:00..12:00 on anchor date
+  - colon time ranges: "09:00-11:30" -> parse both sides as times on anchor date
+  - otherwise falls back to trying every dash split and calling resolveDashRangeSides(left,right,...)
+*/
+func resolveDashRangeToken(s string, anchor time.Time, loc *time.Location) (time.Time, time.Time, error) {
+	// now-anchored: now-30m
+	if m := regexp.MustCompile(`(?i)^now-(.+)$`).FindStringSubmatch(s); len(m) == 2 {
+		if looksLikeDuration(m[1]) {
+			d, err := parseDuration(m[1])
+			if err != nil {
+				return time.Time{}, time.Time{}, err
 			}
+			nowt := Now().In(loc)
+			return nowt.Add(-d), nowt, nil
 		}
 	}
-	// Fallback: split on the first dash (preserves simple user patterns like \"9-12\").
+
+	// duration-left anchored to now: 2h-now
+	if m := regexp.MustCompile(`(?i)^(.+)-now$`).FindStringSubmatch(s); len(m) == 2 {
+		if looksLikeDuration(m[1]) {
+			d, err := parseDuration(m[1])
+			if err != nil {
+				return time.Time{}, time.Time{}, err
+			}
+			nowt := Now().In(loc)
+			return nowt.Add(-d), nowt, nil
+		}
+	}
+
+	// hour-only simple dash like "9-12" or "09-12" -> interpret as hours on anchor date
+	if m := regexp.MustCompile(`^(\d{1,2})-(\d{1,2})$`).FindStringSubmatch(s); len(m) == 3 {
+		h1i, _ := strconv.Atoi(m[1])
+		h2i, _ := strconv.Atoi(m[2])
+		st := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), h1i, 0, 0, 0, loc)
+		en := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), h2i, 0, 0, 0, loc)
+		if !en.After(st) {
+			return time.Time{}, time.Time{}, fmt.Errorf("end must be after start in range: %s", s)
+		}
+		return st, en, nil
+	}
+
+	// time-with-colon dash like "09:00-11:30" or "9:00-11:00"
+	if m := regexp.MustCompile(`^(\d{1,2}:\d{2}(?::\d{2})?)-(\d{1,2}:\d{2}(?::\d{2})?)$`).FindStringSubmatch(s); len(m) == 3 {
+		left := m[1]
+		right := m[2]
+		st, err1 := parseTimeOfDay(left, anchor, loc)
+		if err1 != nil {
+			return time.Time{}, time.Time{}, err1
+		}
+		en, err2 := parseTimeOfDay(right, anchor, loc)
+		if err2 != nil {
+			return time.Time{}, time.Time{}, err2
+		}
+		if !en.After(st) {
+			return time.Time{}, time.Time{}, fmt.Errorf("end must be after start in range: %s", s)
+		}
+		return st, en, nil
+	}
+
+	// Generic fallback: try splitting at each dash candidate and resolving sides.
+	parts := strings.Split(s, "-")
+	for i := 1; i < len(parts); i++ {
+		left := strings.Join(parts[:i], "-")
+		right := strings.Join(parts[i:], "-")
+		if st, en, err := resolveDashRangeSides(left, right, anchor, loc); err == nil {
+			return st, en, nil
+		}
+	}
+
+	return time.Time{}, time.Time{}, fmt.Errorf("could not parse dashed range: %s", s)
+}
+
+// splitDashRange remains for compatibility with older callers that explicitly split a single token
+// into left/right; prefer resolveDashRangeToken above for robust parsing.
+func splitDashRange(s string) (string, string) {
 	parts := strings.SplitN(s, "-", 2)
 	if len(parts) == 2 {
 		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])

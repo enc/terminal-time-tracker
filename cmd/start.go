@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -12,6 +13,7 @@ var (
 	startTags     []string
 	startNote     string
 	startAt       string
+	startFor      string
 )
 
 var startCmd = &cobra.Command{
@@ -34,10 +36,29 @@ var startCmd = &cobra.Command{
 		id := IDGen()
 		billable := boolPtr(startBillable)
 		ev := NewStartEvent(id, customer, project, startActivity, billable, startNote, startTags, ts)
+
+		// If user provided --for, schedule an auto-stop by adding meta["auto_stop"] with RFC3339 time.
+		if startFor != "" {
+			d, err := parseDuration(startFor)
+			if err != nil {
+				cobra.CheckErr(fmt.Errorf("invalid --for value: %v", err))
+			}
+			end := ts.Add(d)
+			if ev.Meta == nil {
+				ev.Meta = map[string]string{}
+			}
+			ev.Meta["auto_stop"] = end.Format(time.RFC3339)
+		}
+
 		if err := writeEvent(ev); err != nil {
 			cobra.CheckErr(err)
 		}
-		fmt.Printf("Started: %s %s [%s] billable=%v\n", customer, project, startActivity, fmtBillable(billable))
+
+		if startFor != "" {
+			fmt.Printf("Started: %s %s [%s] billable=%v (auto-stop at %s)\n", customer, project, startActivity, fmtBillable(billable), ev.Meta["auto_stop"])
+		} else {
+			fmt.Printf("Started: %s %s [%s] billable=%v\n", customer, project, startActivity, fmtBillable(billable))
+		}
 	},
 }
 
@@ -47,4 +68,5 @@ func init() {
 	startCmd.Flags().StringSliceVarP(&startTags, "tag", "t", []string{}, "add tag(s)")
 	startCmd.Flags().StringVarP(&startNote, "note", "n", "", "note for this entry")
 	startCmd.Flags().StringVar(&startAt, "at", "", "custom start time (accepts same formats as 'add')")
+	startCmd.Flags().StringVar(&startFor, "for", "", "auto-stop after duration (e.g. 25m)")
 }

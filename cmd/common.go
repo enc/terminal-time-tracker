@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -145,6 +146,138 @@ var (
 	Now   NowProvider = func() time.Time { return nowLocal() }
 	IDGen IDProvider  = func() string { return fmt.Sprintf("tt_%d", time.Now().UnixNano()) }
 )
+
+// init hooks the sweep of scheduled auto-stops into the CLI lifecycle by assigning
+// a PersistentPreRun hook on rootCmd. This will run before any command executes.
+func init() {
+	// preserve any existing hook
+	prev := rootCmd.PersistentPreRun
+	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		if prev != nil {
+			prev(cmd, args)
+		}
+		if err := sweepAutoStops(); err != nil {
+			fmt.Printf("WARN: sweep auto-stops failed: %v\n", err)
+		}
+	}
+}
+
+// sweepAutoStops inspects recent journal files and uses the journal.Parser to
+// reconstruct entries. For start events that carry meta["auto_stop"] and whose
+// corresponding reconstructed entry is still open (no End), this function will
+// write a stop event at the scheduled auto-stop time.
+//
+// This approach is more precise than scanning stop events naively because the
+// parser applies correction events (amend/split/merge) and yields the effective
+// view of entries.
+func sweepAutoStops() error {
+	home, _ := os.UserHomeDir()
+	base := filepath.Join(home, ".tt", "journal")
+	_ = base
+	now := Now()
+
+	// Build a parser that uses configured timezone (same as other parsing code).
+	p := journal.NewParser(viper.GetString("timezone"))
+
+	// Collect start events that carried auto_stop metadata and whose scheduled stop <= now.
+	type cand struct {
+		EventID  string
+		StartTS  time.Time
+		AutoStop time.Time
+		Path     string // source journal path
+	}
+	candidates := map[string]cand{} // keyed by start event ID
+	paths := map[string]struct{}{}  // set of journal paths to parse
+
+	// Scan the last N days for start events with auto_stop metadata.
+	const scanDays = 3
+	for i := 0; i < scanDays; i++ {
+		day := now.AddDate(0, 0, -i)
+		pth := journalPathFor(day)
+		f, err := os.Open(pth)
+		if err != nil {
+			continue
+		}
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if line == "" {
+				continue
+			}
+			var ev journal.Event
+			if err := json.Unmarshal([]byte(line), &ev); err != nil {
+				continue
+			}
+			if ev.Type != "start" {
+				continue
+			}
+			if ev.Meta == nil {
+				continue
+			}
+			asStr, ok := ev.Meta["auto_stop"]
+			if !ok || asStr == "" {
+				continue
+			}
+			asTime, err := time.Parse(time.RFC3339, asStr)
+			if err != nil {
+				continue
+			}
+			// Only consider auto-stops that are due
+			if asTime.After(now) {
+				continue
+			}
+			// register candidate and remember path for parsing
+			candidates[ev.ID] = cand{
+				EventID:  ev.ID,
+				StartTS:  ev.TS,
+				AutoStop: asTime,
+				Path:     pth,
+			}
+			paths[pth] = struct{}{}
+		}
+		f.Close()
+	}
+
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// Parse each relevant journal file with the parser to reconstruct entries.
+	// Build a map of entry id -> journal.Entry for quick lookup.
+	entryMap := make(map[string]journal.Entry)
+	for pth := range paths {
+		ents, err := p.ParseFile(pth)
+		if err != nil {
+			// If parser fails for a path, skip it (we don't want sweep to be brittle).
+			continue
+		}
+		for _, e := range ents {
+			// store by ID; parser reconstructs entries with IDs derived from start events.
+			entryMap[e.ID] = e
+		}
+	}
+
+	// For each candidate, determine whether the reconstructed entry is still open.
+	for id, c := range candidates {
+		ent, ok := entryMap[id]
+		if !ok {
+			// If parser did not produce an entry with this start ID, we conservatively skip.
+			// This can happen for complex correction sequences or if the start was moved/merged.
+			continue
+		}
+		// If End is nil -> entry still open: write auto-stop
+		if ent.End == nil {
+			stopEv := NewStopEvent(IDGen(), c.AutoStop)
+			if err := Writer.WriteEvent(stopEv); err != nil {
+				fmt.Printf("WARN: failed to write auto-stop for start %s: %v\n", id, err)
+				// continue to next candidate
+			}
+		}
+		// If End != nil, the entry has already been closed (maybe by user or corrections). Do nothing.
+	}
+
+	return nil
+}
 
 // Convenience wrapper to maintain backwards compatibility with callers that use writeEvent.
 func writeEvent(e Event) error { return Writer.WriteEvent(e) }
