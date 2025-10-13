@@ -185,8 +185,57 @@ If you'd like, I can:
 - Add a non-interactive `--yes` switch for `--install-zsh` (useful for scripted installs).
 - Add automated installers for Bash/Fish/PowerShell as well (these require careful behavior around system vs user locations).
 - Add caching to completion suggestions to improve performance on very large journals.
+- Add a `customer-merge` helper and documentation for managing customer canonicalization (see below).
 
 Happy to proceed with any of the above — tell me which option you prefer.
+
+## customer-merge: non-destructive customer normalization
+
+`tt` includes a non-destructive helper, `tt customer-merge`, which lets you consolidate multiple customer name variants into a single canonical name without rewriting journal files. Instead of editing old JSONL lines (which would require recomputing hashes and anchors), the command writes append-only `amend` events that set the canonical customer for the targeted entries. The journal parser understands `amend` events, so subsequent `tt ls`, `tt report`, and other viewers will show the canonical name.
+
+Quick summary
+- Command: `tt customer-merge [--targets ids] --to <canonical> [--note "<text>"] [--dry-run]`
+- Selection:
+  - `--targets a,b,c` — explicit list of entry IDs to amend.
+  - `--since <time> --from "Old A,Old B"` — find entries since the given time whose customer matches any of the `--from` names and amend them.
+- Safety:
+  - Default: `--dry-run=true` (prints a plan and does not write). Use `--dry-run=false` to actually write amend events.
+  - The command appends `amend` events (Type=`amend`, Ref=`<entry-id>`, Customer=`<canonical>`) using the same write path as interactive `amend` so the operation is append-only and auditable.
+- Mapping persistence:
+  - When the command discovers or is told source names (via `--from`) it will persist a mapping under `customers.map` in your `~/.tt/config.yaml`. This mapping is used by completion helpers and reporting code to hide merged source variants and prefer the canonical name.
+
+Example usage
+- Dry-run explicit targets:
+  ```bash
+  tt customer-merge --targets a1,b2 --to "Acme" --note "merge variants"
+  ```
+- Apply to explicit targets:
+  ```bash
+  tt customer-merge --targets a1,b2 --to "Acme" --dry-run=false
+  ```
+- Merge discovered sources since a date:
+  ```bash
+  tt customer-merge --since 2025-10-01 --from "ACME Corp,Acme, Inc" --to "Acme" --dry-run=false
+  ```
+
+Config example (`~/.tt/config.yaml`)
+```yaml
+customers:
+  map:
+    "ACME Corp": "Acme"
+    "Acme, Inc": "Acme"
+    "acme": "Acme"
+```
+
+How completion and reporting behave
+- After mapping is persisted, the completion helpers will hide merged source names (e.g., `ACME Corp`) and surface the canonical name (e.g., `Acme`) instead. This keeps tab-completion and suggestion lists clean and focused on canonical values.
+- Reports and `tt ls` will reflect the canonical name after the amend event is applied (the parser applies `amend` events when reconstructing entries).
+
+Notes & recommendations
+- The non-destructive workflow is reversible and auditable (amend events are appended and the original lines remain).
+- If you need to permanently rewrite stored journal lines (for export or external tooling), we can implement a separate, careful rewrite workflow that recomputes canonical payload hashes and anchors — but that is more invasive and should be performed with backups and dry-runs.
+- If you want, I can add `tt customer-merge list` and `tt customer-merge undo` helpers to manage mappings and revert mapping entries.
+
 
 ## Repairing journal hashes: `tt audit repair`
 

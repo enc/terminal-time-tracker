@@ -150,19 +150,25 @@ func customerProjectValidArgs(cmd *cobra.Command, args []string, toComplete stri
 	}
 
 	// No args -> complete customer. Include alias customer (if any) at the front.
+	// No args -> complete customer
 	if len(args) == 0 {
-		custs := uniqueStringsFromJournal("customer")
+		// Filter out any source customer names that have been merged away so they
+		// don't appear in the completion list. This also ensures canonical names
+		// appear when appropriate.
+		custs := FilterCustomersForCompletion(uniqueStringsFromJournal("customer"))
 		if aliasName != "" {
 			if a, ok := getAlias(aliasName); ok && a.Customer != "" {
+				// If the alias customer is a merged source, prefer its canonical name.
+				aliasCust := CanonicalCustomer(a.Customer)
 				found := false
 				for _, c := range custs {
-					if c == a.Customer {
+					if c == aliasCust {
 						found = true
 						break
 					}
 				}
 				if !found {
-					custs = append([]string{a.Customer}, custs...)
+					custs = append([]string{aliasCust}, custs...)
 				}
 			}
 		}
@@ -218,7 +224,8 @@ func customerProjectValidArgs(cmd *cobra.Command, args []string, toComplete stri
 func addCmdValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	// Before the optional customer (positions: 0=start,1=end), args length 2 means user is completing the customer
 	if len(args) <= 2 {
-		custs := uniqueStringsFromJournal("customer")
+		// Exclude merged source customer names from completion suggestions.
+		custs := FilterCustomersForCompletion(uniqueStringsFromJournal("customer"))
 		return filterPrefixAndSort(custs, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
 	// If user already provided customer (args[2]), complete project
