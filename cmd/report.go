@@ -90,10 +90,15 @@ var reportCmd = &cobra.Command{
 			groupEntries[k] = append(groupEntries[k], e)
 		}
 
-		// Header / summary
-		fmt.Printf("Report Range: %s → %s   TZ: %s\n", from.Format("2006-01-02"), to.Format("2006-01-02"), time.Now().Location())
-		fmt.Printf("Loaded entries: %d   Considered (finished): %d   Rounding: strategy=%s quantum=%d minimum=%d\n\n",
-			len(entries), considered, r.Strategy, r.QuantumMin, r.MinimumEntry)
+		// Header / summary (colorized)
+		// Labels use `ansiHeading`, numeric/emphasized values use `ansiHours` for clear hierarchy.
+		fmt.Printf("%sReport Range:%s %s → %s   TZ: %s\n",
+			ansiHeading, ansiReset, from.Format("2006-01-02"), to.Format("2006-01-02"), time.Now().Location())
+		fmt.Printf("%sLoaded entries:%s %s%d%s   Considered (finished): %s%d%s   Rounding: strategy=%s quantum=%d minimum=%d\n\n",
+			ansiHeading, ansiReset,
+			ansiHours, len(entries), ansiReset,
+			ansiHours, considered, ansiReset,
+			r.Strategy, r.QuantumMin, r.MinimumEntry)
 
 		if considered == 0 {
 			fmt.Println("No finished entries in the selected range.")
@@ -119,8 +124,13 @@ var reportCmd = &cobra.Command{
 		// Print groups using helper for consistent week/day formatting
 		fmt.Print(formatGroups(agg, groupEntries, repDetailed))
 
-		// Overall total
-		fmt.Printf("TOTAL: %s raw → %s rounded (+%dm)\n", fmtHHMM(totalRaw), fmtHHMM(totalRounded), totalRounded-totalRaw)
+		// Overall total (emphasized)
+		// Use heading color for the label and hours color for the numeric totals.
+		fmt.Printf("%sTOTAL:%s %s%s%s raw → %s%s%s rounded (+%dm)\n",
+			ansiHeading, ansiReset,
+			ansiHours, fmtHHMM(totalRaw), ansiReset,
+			ansiHours, fmtHHMM(totalRounded), ansiReset,
+			totalRounded-totalRaw)
 	},
 }
 

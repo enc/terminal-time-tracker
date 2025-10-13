@@ -93,9 +93,11 @@ func formatGroups(agg map[aggKey]*aggVal, groupEntries map[aggKey][]Entry, detai
 			}
 		}
 
-		// Totals line for the group
-		b.WriteString(fmt.Sprintf("    %sGroup total:%s Raw=%s Rounded=%s (+%dm)\n\n",
-			heading, reset, fmtHHMM(v.RawMin), fmtHHMM(v.RoundedMin), v.RoundedMin-v.RawMin))
+		// Totals line for the group — align totals under the hours column.
+		// We print the label padded to the same `labelW` then emit the raw/rounded values
+		// starting at the same column where hours appear above.
+		b.WriteString(fmt.Sprintf("  %s%-*s%s %sRaw=%s Rounded=%s (+%dm)\n\n",
+			heading, labelW, "Group total:", reset, hoursCol, fmtHHMM(v.RawMin), fmtHHMM(v.RoundedMin), v.RoundedMin-v.RawMin))
 	}
 
 	return b.String()

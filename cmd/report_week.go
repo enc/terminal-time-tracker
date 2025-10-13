@@ -589,19 +589,8 @@ func weekdayLabelFor(wd time.Weekday, locale string) string {
 }
 
 func printTableReport(from, to time.Time, tz string, days []outDay, weekTotal int64, quantumSec int64, overlaps []string, badEntries []string) {
-	// ANSI color codes (subtle palette suitable for dark backgrounds)
-	const (
-		colReset  = "\x1b[0m"
-		colBold   = "\x1b[1m"
-		colDim    = "\x1b[2m"
-		colBlue   = "\x1b[36m"   // cyan accent
-		colGreen  = "\x1b[32m"   // green for totals
-		colYellow = "\x1b[90m"   // subtle gray for subtotals
-		colRed    = "\x1b[2;31m" // dim red for alerts
-	)
-
-	// Header (bold blue)
-	fmt.Printf("%s%sWoche %s%s  %s\n\n", colBold, colBlue, fmtWeekLabel(from, to), colReset, tz)
+	// Header (heading color)
+	fmt.Printf("%sWoche %s%s  %s\n\n", ansiHeading, fmtWeekLabel(from, to), ansiReset, tz)
 	totalHours := float64(weekTotal) / 3600.0
 
 	// Column widths for table-like layout
@@ -609,12 +598,12 @@ func printTableReport(from, to time.Time, tz string, days []outDay, weekTotal in
 	const hoursWidth = 7
 
 	for _, d := range days {
-		// Day header: bold
-		fmt.Printf("%s%s %s%s\n", colBold, d.Weekday, d.Date, colReset)
+		// Day header: heading color
+		fmt.Printf("%s%s %s%s\n", ansiHeading, d.Weekday, d.Date, ansiReset)
 
-		// If no groups, print a friendly empty hint
+		// If no groups, print a friendly empty hint (dim)
 		if len(d.Groups) == 0 {
-			fmt.Printf("  %s(no entries)%s\n", colDim, colReset)
+			fmt.Printf("  %s(no entries)%s\n", ansiDim, ansiReset)
 		}
 
 		for _, g := range d.Groups {
@@ -628,38 +617,37 @@ func printTableReport(from, to time.Time, tz string, days []outDay, weekTotal in
 			if len(label) > labelWidth-2 {
 				label = label[:labelWidth-5] + "..."
 			}
-			// Colored customer/project label, hours in green, notes dimmed
-			fmt.Printf("  %s%-*s%s %s%*.2fh%s\n", colBlue, labelWidth, label, colReset, colGreen, hoursWidth, hours, colReset)
-			// Notes (wrapped are already produced by mergeNotesForDisplay); show on next line indented and dim
+			// Colored customer/project label, hours in green, notes muted
+			fmt.Printf("  %s%-*s%s %s%*.2fh%s\n", ansiLabel, labelWidth, label, ansiReset, ansiHours, hoursWidth, hours, ansiReset)
+			// Notes (wrapped are already produced by mergeNotesForDisplay); show on next line indented and muted
 			if g.NotesMerged != "" {
-				// indent notes block
 				lines := strings.Split(g.NotesMerged, "\n")
 				for _, ln := range lines {
-					fmt.Printf("    %s- %s%s\n", colDim, ln, colReset)
+					fmt.Printf("    %s- %s%s\n", ansiNotes, ln, ansiReset)
 				}
 			}
 		}
 
-		// Day subtotal: bold yellow; mark overlap if present
+		// Day subtotal: subtotal color; mark overlap if present using alert color
 		dayHours := float64(d.DaySeconds) / 3600.0
 		overlapMark := ""
 		if len(d.Flags) > 0 {
-			overlapMark = fmt.Sprintf(" %s! overlap%s", colRed, colReset)
+			overlapMark = fmt.Sprintf(" %s! overlap%s", ansiOverlap, ansiReset)
 		}
-		fmt.Printf("\n  %sTagessumme:%s %s%*.2fh%s%s\n\n", colBold, colReset, colYellow, hoursWidth, dayHours, colReset, overlapMark)
+		fmt.Printf("\n  %sTagessumme:%s %s%*.2fh%s%s\n\n", ansiHeading, ansiReset, ansiWarn, hoursWidth, dayHours, ansiReset, overlapMark)
 	}
 
-	// Weekly total emphasized
-	fmt.Printf("%sWochensumme:%s %s%.2fh%s\n", colBold, colReset, colGreen, totalHours, colReset)
+	// Weekly total emphasized: heading + hours color
+	fmt.Printf("%sWochensumme:%s %s%.2fh%s\n", ansiHeading, ansiReset, ansiHours, totalHours, ansiReset)
 
 	// Footer hints: overlaps and data issues, colored
 	if len(overlaps) > 0 || len(badEntries) > 0 {
-		fmt.Printf("\n%sHinweise:%s\n", colBold, colReset)
+		fmt.Printf("\n%sHinweise:%s\n", ansiHeading, ansiReset)
 		for _, o := range overlaps {
-			fmt.Printf("  %s! overlap:%s %s\n", colRed, colReset, o)
+			fmt.Printf("  %s! overlap:%s %s\n", ansiOverlap, ansiReset, o)
 		}
 		if len(badEntries) > 0 {
-			fmt.Printf("  %sData issues:%s %d entries\n", colYellow, colReset, len(badEntries))
+			fmt.Printf("  %sData issues:%s %d entries\n", ansiWarn, ansiReset, len(badEntries))
 			for _, be := range badEntries {
 				fmt.Printf("    - %s\n", be)
 			}
