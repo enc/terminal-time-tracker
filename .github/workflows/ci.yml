@@ -5,14 +5,14 @@ on:
     branches:
       - main
     tags:
-      - 'v*'
+      - "v*"
   pull_request:
     branches:
       - main
   workflow_dispatch:
 
 env:
-  GO_VERSION: '1.24'
+  GO_VERSION: "1.24"
 
 jobs:
   test:
@@ -64,8 +64,9 @@ jobs:
       # The goreleaser action will install and run goreleaser for us.
       # Ensure you have a valid .goreleaser.yml in the repository root.
       - name: Run goreleaser
-        uses: goreleaser/goreleaser-action@v2
+        uses: goreleaser/goreleaser-action@v4
         with:
-          args: release --rm-dist
+          version: latest
+          args: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
