@@ -8,6 +8,7 @@ env:
 before:
   hooks:
     - go mod download
+    - echo '0.1.0' > VERSION
 
 # Build configuration
 builds:
@@ -36,6 +37,7 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
+      - VERSION
     replacements:
       darwin: macOS
       amd64: x86_64
@@ -61,7 +63,6 @@ release:
   #   name: your-repo-name
   draft: false
   prerelease: false
-
 # Artifacts signing section is intentionally left out.
 # If you need GPG signing, add a `signs` block and configure signing in CI secrets.
 
