@@ -2,15 +2,27 @@
 
 A minimal, ready-to-run Go skeleton implementing the core commands:
 
-- `tt start [customer] [project]` (with flags: `-a/--activity`, `-b/--billable`, `-t/--tag`, `-n/--note`)
+- `tt start [customer] [project]` (with flags: `-a/--activity`, `-b/--billable`, `-t/--tag`, `-n/--note`; supports `--at` which accepts relative expressions and absolute timestamps)
 - `tt stop`
-- `tt switch [customer] [project]` (stops current, starts new)
+- `tt switch [customer] [project]` (stops current, starts new; accepts `--at` like `start` so the stop and subsequent start are written using the same parsed timestamp)
 - `tt note <text>` (adds a note to the current running entry)
 - `tt add <start> <end> [customer] [project]` (retro-add, ISO8601 or 'YYYY-MM-DDTHH:MM')
 - `tt ls [--today|--range A..B]`
 - `tt report [--today|--week|--range A..B] [--by fields]`
 - `tt audit verify`
 - `tt completion` (generate shell completion; see below)
+
+The `--at` flag (available on `start` and `switch`) accepts both absolute timestamps and a variety of convenient relative expressions. Supported forms include:
+- RFC3339 / absolute datetimes (e.g. `2025-10-20T08:00:00Z`, `2025-10-20 08:00`)
+- Time-of-day (interpreted on the configured date, e.g. `09:30` -> today at 09:30 in configured timezone)
+- Now-anchored ranges: `now-30m`, `2h-now` (interpreted as a start time relative to the current anchor)
+- Durations: `+15m`, `15m` (treated as an offset from Now; e.g. `+15m` -> Now() + 15 minutes)
+
+Examples:
+- Start a session 5 minutes ago:
+  `tt start --at "now-5m" Acme Project -a dev`
+- Switch to a new session as if it happened 10 minutes ago:
+  `tt switch --at "now-10m" Acme Project -a meeting`
 
 Data is stored locally in JSONL journals under `~/.tt/journal/YYYY/MM/YYYY-MM-DD.jsonl`.
 Config in `~/.tt/config.yaml`.
