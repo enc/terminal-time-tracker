@@ -28,10 +28,19 @@ var startCmd = &cobra.Command{
 		if len(args) > 1 {
 			project = args[1]
 		}
-		// Determine timestamp: either provided via --at or Now provider (injected for tests)
+		// Determine timestamp: either provided via --at or Now provider (injected for tests).
+		// Accept flexible/relative expressions (e.g. "now-30m", "+15m", "14:30") by trying the
+		// flexible parser first (same parsing used by `add`/ParseFlexibleRange). If that fails,
+		// fall back to the legacy absolute parser.
 		ts := Now()
 		if startAt != "" {
-			ts = mustParseTimeLocal(startAt)
+			// Try flexible parsing which understands durations and now-anchored forms.
+			if st, _, cons, err := ParseFlexibleRange([]string{startAt}, Now()); err == nil && cons > 0 && !st.IsZero() {
+				ts = st
+			} else {
+				// Maintain backward compatibility with existing absolute formats.
+				ts = mustParseTimeLocal(startAt)
+			}
 		}
 		id := IDGen()
 		billable := boolPtr(startBillable)
@@ -67,6 +76,6 @@ func init() {
 	startCmd.Flags().BoolVarP(&startBillable, "billable", "b", true, "mark as billable (default true)")
 	startCmd.Flags().StringSliceVarP(&startTags, "tag", "t", []string{}, "add tag(s)")
 	startCmd.Flags().StringVarP(&startNote, "note", "n", "", "note for this entry")
-	startCmd.Flags().StringVar(&startAt, "at", "", "custom start time (accepts same formats as 'add')")
+	startCmd.Flags().StringVar(&startAt, "at", "", "custom start time (accepts same formats as 'add', including relative expressions like 'now-30m' or '+15m')")
 	startCmd.Flags().StringVar(&startFor, "for", "", "auto-stop after duration (e.g. 25m)")
 }
