@@ -1,0 +1,79 @@
+project_name: tt
+
+# Global environment used by builds
+env:
+  - CGO_ENABLED=0
+
+# Hook to run before building (ensure modules are downloaded)
+before:
+  hooks:
+    - go mod download
+
+# Build configuration
+builds:
+  - id: tt
+    main: ./main.go
+    binary: tt
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    # Common flags (strip debugging info to reduce binary size)
+    ldflags:
+      - -s -w
+
+# Archive configuration: create tar.gz for UNIX, zip for Windows
+archives:
+  - format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+    replacements:
+      darwin: macOS
+      amd64: x86_64
+
+# Checksums for all produced artifacts
+checksum:
+  name_template: "checksums.txt"
+
+# Changelog: generate from git tags/commits
+changelog:
+  use: git
+
+# Snapshot naming (for CI snapshot builds)
+snapshot:
+  name_template: "{{ .Tag }}-snapshot"
+
+# Release settings: goreleaser will publish to GitHub by default when run in CI
+release:
+  # If you want to customize the GitHub repository, configure `github.owner` and `github.name`.
+  # Leaving these out lets goreleaser infer them from the git remote in CI.
+  # github:
+  #   owner: your-github-username
+  #   name: your-repo-name
+  draft: false
+  prerelease: false
+
+# Artifacts signing section is intentionally left out.
+# If you need GPG signing, add a `signs` block and configure signing in CI secrets.
+
+# Homebrew tap/formula example (commented).
+# To enable, uncomment and set your GitHub tap repo (owner/repo).
+# brew:
+#   - name: tt
+#     folder: Formula
+#     gitlab: false
+#     github:
+#       owner: your-github-username
+#       name: your-tap-repo
+#     homepage: https://github.com/your-github-username/your-repo
+
+# Docker publishing is intentionally omitted. Add a `dockers` section if desired.
