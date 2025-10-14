@@ -64,9 +64,10 @@ jobs:
       # The goreleaser action will install and run goreleaser for us.
       # Ensure you have a valid .goreleaser.yml in the repository root.
       - name: Run goreleaser
-        uses: goreleaser/goreleaser-action@v4
+        uses: goreleaser/goreleaser-action@v6
         with:
-          version: latest
+          distribution: goreleaser
+          version: "~> v2"
           args: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

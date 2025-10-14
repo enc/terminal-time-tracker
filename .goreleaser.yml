@@ -1,3 +1,4 @@
+version: 2
 project_name: tt
 
 # Global environment used by builds
@@ -15,13 +16,11 @@ builds:
   - id: tt
     main: ./main.go
     binary: tt
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
+    targets:
+      - linux_amd64
+      - linux_arm64
+      - darwin_arm64
+      - windows_amd64
     env:
       - CGO_ENABLED=0
     # Common flags (strip debugging info to reduce binary size)
@@ -38,9 +37,6 @@ archives:
     files:
       - README.md
       - VERSION
-    replacements:
-      darwin: macOS
-      amd64: x86_64
 
 # Checksums for all produced artifacts
 checksum:
