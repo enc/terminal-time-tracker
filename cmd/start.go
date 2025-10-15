@@ -63,10 +63,26 @@ var startCmd = &cobra.Command{
 			cobra.CheckErr(err)
 		}
 
+		// Provide a richer response: show the started entry plus context about any
+		// previously running entry (note: `start` does not stop previous entries).
+		// Lookup last open entry that started strictly before this start timestamp.
+		prev, _ := LastOpenEntryAt(ts.Add(-time.Nanosecond))
+		if prev != nil {
+			fmt.Printf("%sNOTE: a running entry was detected prior to this start (it was NOT stopped):%s\n", ansiWarn, ansiReset)
+			// Provide a concise summary of the running entry: customer/project, activity,
+			// start time and current duration.
+			durMin := int(Now().Sub(prev.Start).Minutes())
+			fmt.Printf("%s%s / %s [%s]%s started=%s duration=%s\n",
+				ansiLabel, prev.Customer, prev.Project, prev.Activity, ansiReset,
+				formatTS(prev.Start), fmtHHMM(durMin))
+		}
+
+		// Print consistent formatted start summary. If an auto-stop was scheduled,
+		// include the auto-stop timestamp in the output.
 		if startFor != "" {
-			fmt.Printf("Started: %s %s [%s] billable=%v (auto-stop at %s)\n", customer, project, startActivity, fmtBillable(billable), ev.Meta["auto_stop"])
+			fmt.Printf("%s (auto-stop at %s)\n", FormatStartResult(ev), ev.Meta["auto_stop"])
 		} else {
-			fmt.Printf("Started: %s %s [%s] billable=%v\n", customer, project, startActivity, fmtBillable(billable))
+			fmt.Println(FormatStartResult(ev))
 		}
 	},
 }

@@ -471,5 +471,149 @@ func parseRangeFlags(today bool, week bool, rng string) (time.Time, time.Time) {
 func fmtHHMM(min int) string {
 	h := min / 60
 	m := min % 60
-	return fmt.Sprintf("%dh%02dm", h, m)
+	if min <= 0 {
+		return "0m"
+	}
+	if h > 0 {
+		return fmt.Sprintf("%dh%02dm", h, m)
+	}
+	return fmt.Sprintf("%dm", m)
+}
+
+// fmtDuration formats a time.Duration into a compact human-friendly string.
+// Examples: 45m -> "45m", 90m -> "1h30m", 2h5m -> "2h05m".
+// This helper is used by tests and the CLI formatters.
+func fmtDuration(d time.Duration) string {
+	// Round down to full minutes for display consistency
+	m := int(d.Minutes())
+	if m <= 0 {
+		return "0m"
+	}
+	h := m / 60
+	mm := m % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh%02dm", h, mm)
+	}
+	return fmt.Sprintf("%dm", mm)
+}
+
+// formatTS produces a compact human-friendly timestamp for CLI output.
+// Uses Kitchen time (e.g. "3:04PM") for same-day times and includes date
+// for older timestamps to avoid ambiguity.
+func formatTS(t time.Time) string {
+	now := nowLocal()
+	if t.Year() == now.Year() && t.YearDay() == now.YearDay() {
+		return t.Format(time.Kitchen)
+	}
+	// Include date and time for non-today events
+	return t.Format("2006-01-02 " + time.Kitchen)
+}
+
+// LastOpenEntryAt attempts to reconstruct entries for the day containing ts
+// and returns the last open (running) entry whose start is <= ts. If none are
+// found, returns (nil, nil).
+//
+// This is a best-effort helper used by CLI response formatters to explain what
+// was stopped or replaced. It intentionally tolerates parser/file errors and
+// returns nil rather than an error when reconstruction is not possible.
+func LastOpenEntryAt(ts time.Time) (*Entry, error) {
+	// Load entries for the day of ts.
+	from := time.Date(ts.Year(), ts.Month(), ts.Day(), 0, 0, 0, 0, ts.Location())
+	to := from
+	entries, err := loadEntries(from, to)
+	if err != nil {
+		// loadEntries currently never returns a non-nil error in normal flow,
+		// but propagate if it does in the future.
+		return nil, err
+	}
+	// Find the latest entry that started at or before ts and is still open.
+	var candidate *Entry
+	for i := range entries {
+		e := entries[i]
+		if e.Start.After(ts) {
+			continue
+		}
+		if e.End == nil {
+			// running entry
+			if candidate == nil || e.Start.After(candidate.Start) {
+				// pick the most recent running entry
+				c := e
+				candidate = &c
+			}
+		}
+	}
+	return candidate, nil
+}
+
+// FormatStartResult returns a compact, colored (when enabled) one-line summary
+// for a start event. This is intended to replace ad-hoc printf strings in
+// command implementations and provide consistent layout across start/switch.
+func FormatStartResult(ev Event) string {
+	cust := ev.Customer
+	proj := ev.Project
+	act := ev.Activity
+	bill := fmtBillable(ev.Billable)
+
+	start := formatTS(ev.TS)
+
+	// Example:
+	// Started: ACME / website [design] at 14:30 billable=true
+	return fmt.Sprintf("%sStarted:%s %s%s%s / %s%s%s [%s] at %s billable=%v",
+		ansiHeading, ansiReset,
+		ansiLabel, cust, ansiReset,
+		ansiLabel, proj, ansiReset,
+		act, start, bill)
+}
+
+// FormatStopResultFromEntry formats a friendly message describing what was
+// stopped. It accepts the materialized Entry (as reconstructed from the
+// journal) and the stop time used. If entry is nil, a generic message is
+// returned indicating no running entry was found.
+func FormatStopResultFromEntry(ent *Entry, stopTS time.Time) string {
+	if ent == nil {
+		// No running entry found — still useful to report the timestamp.
+		return fmt.Sprintf("%sStopped:%s no running entry found at %s", ansiHeading, ansiReset, formatTS(stopTS))
+	}
+
+	startStr := formatTS(ent.Start)
+	stopStr := formatTS(stopTS)
+	durationMin := 0
+	if ent.End != nil {
+		durationMin = int(ent.End.Sub(ent.Start).Minutes())
+	} else {
+		durationMin = int(stopTS.Sub(ent.Start).Minutes())
+	}
+	dur := fmtHHMM(durationMin)
+
+	billStr := "false"
+	if ent.Billable {
+		billStr = "true"
+	}
+
+	// Example:
+	// Stopped: ACME / website [design] started 10:00 stopped 11:30 duration 1h30m billable=true
+	return fmt.Sprintf("%sStopped:%s %s%s%s / %s%s%s [%s]\n  started=%s stopped=%s duration=%s billable=%s",
+		ansiHeading, ansiReset,
+		ansiLabel, ent.Customer, ansiReset,
+		ansiLabel, ent.Project, ansiReset,
+		ent.Activity,
+		startStr, stopStr, dur, billStr)
+}
+
+// FormatSwitchResult composes a multi-line summary for a switch operation.
+// stopped may be nil (no running entry found) and newStart is the start Event
+// that was written for the new entry.
+func FormatSwitchResult(stopped *Entry, newStart Event) string {
+	var sb strings.Builder
+
+	// First line: switched to new entry
+	sb.WriteString(fmt.Sprintf("%sSwitched to:%s %s%s%s / %s%s%s [%s] at %s billable=%v\n",
+		ansiHeading, ansiReset,
+		ansiLabel, newStart.Customer, ansiReset,
+		ansiLabel, newStart.Project, ansiReset,
+		newStart.Activity, formatTS(newStart.TS), fmtBillable(newStart.Billable)))
+
+	// Then: what we stopped (if any)
+	sb.WriteString(FormatStopResultFromEntry(stopped, newStart.TS))
+	return sb.String()
 }

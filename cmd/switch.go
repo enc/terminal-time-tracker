@@ -32,6 +32,10 @@ var switchCmd = &cobra.Command{
 			}
 		}
 
+		// Reconstruct the running entry at the switch time so we can report what was stopped.
+		// Best-effort: when reconstruction fails, running will be nil and output will reflect that.
+		running, _ := LastOpenEntryAt(ts)
+
 		// stop - ensure we handle any error (use ts so stop/start are aligned)
 		stopEv := NewStopEvent(IDGen(), ts)
 		if err := Writer.WriteEvent(stopEv); err != nil {
@@ -52,7 +56,9 @@ var switchCmd = &cobra.Command{
 		if err := Writer.WriteEvent(ev); err != nil {
 			cobra.CheckErr(err)
 		}
-		fmt.Printf("Switched to: %s %s [%s] billable=%v\n", customer, project, switchActivity, fmtBillable(billable))
+
+		// Use centralized formatter to present a multi-line summary including what was stopped.
+		fmt.Print(FormatSwitchResult(running, ev))
 	},
 }
 
