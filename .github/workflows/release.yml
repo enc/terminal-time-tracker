@@ -1,0 +1,86 @@
+name: goreleaser
+
+on:
+  push:
+    # Trigger releases on tags like v1.2.3. Change to '*' to match any tag.
+    tags:
+      - "v*"
+
+# Recommended permissions so the workflow can create releases and upload packages.
+# If you need attestations, notarization or other features, add the corresponding permissions.
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  issues: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    # Choose token robustly: prefer a Personal Access Token (PAT) stored in `GH_PAT`
+    # (useful when default GITHUB_TOKEN is restricted by org policies or for forks).
+    # Fall back to the automatically provided token if no PAT is present.
+    env:
+      GITHUB_TOKEN: ${{ secrets.GH_PAT && secrets.GH_PAT || github.token }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # full history and tags required for correct changelog and git metadata
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Create VERSION file from tag
+        # Create a VERSION file that matches the tag used to trigger the workflow.
+        # We prefer `github.ref_name` when available; otherwise fall back to parsing GITHUB_REF.
+        run: |
+          # github.ref_name is expanded by Actions runner if available
+          if [ -n "${{ github.ref_name }}" ] && [ "${{ github.ref_name }}" != "null" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            # GITHUB_REF is like refs/tags/v1.2.3 -> extract last segment
+            TAG="${GITHUB_REF##*/}"
+          fi
+          echo "$TAG" > VERSION
+          echo "Wrote VERSION: $(cat VERSION)"
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          # use OSS distribution; change to goreleaser-pro if you have a key
+          distribution: goreleaser
+          # ensure a v2 release line (adjust as needed)
+          version: "~> v2"
+          args: release --rm-dist --clean
+        env:
+          # goreleaser reads GITHUB_TOKEN from the environment
+          GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+          # Optional: if you publish a Homebrew tap or need a different token, pass it here:
+          # TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          # If you use GPG signing/commit signing import keys earlier and set:
+          # GPG_FINGERPRINT: ${{ secrets.GPG_FINGERPRINT }}
+
+      - name: Upload dist artifact (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      # Optional: If the default token is not enough (e.g. organization restrictions),
+      # create a GitHub token with repo scope and set it as the secret `GH_PAT`.
+      #
+      # Notes:
+      # - Always use `fetch-depth: 0` so GoReleaser can find previous tags and compute changelogs.
+      # - Avoid hardcoding a VERSION in your repo; generating VERSION from the tag in CI prevents
+      #   mismatches between the release tag and the packaged files (the repo .goreleaser.yml still
+      #   can include `files: - VERSION` to bundle the generated file).
+      # - If you still hit "Resource not accessible by integration" (403), switch to a PAT with
+      #   appropriate scopes (repo for private repos, public_repo for public) and store it as `GH_PAT`.

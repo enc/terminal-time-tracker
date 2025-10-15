@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 version: 2
 project_name: tt
 
@@ -9,7 +10,8 @@ env:
 before:
   hooks:
     - go mod download
-    - echo '0.1.0' > VERSION
+    # VERSION file should be created in CI from the git tag (e.g. echo "${{ github.ref_name }}" > VERSION).
+    # Avoid hardcoding a version here to prevent mismatches with git tags.
 
 # Build configuration
 builds:
@@ -29,11 +31,14 @@ builds:
 
 # Archive configuration: create tar.gz for UNIX, zip for Windows
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    wrap_in_directory: true
     files:
       - README.md
       - VERSION
@@ -48,7 +53,7 @@ changelog:
 
 # Snapshot naming (for CI snapshot builds)
 snapshot:
-  name_template: "{{ .Tag }}-snapshot"
+  version_template: "{{ .Tag }}-snapshot"
 
 # Release settings: goreleaser will publish to GitHub by default when run in CI
 release:
