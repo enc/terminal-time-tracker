@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 // amend command flags
 var (
 	amendLast      bool
+	amendSelect    bool
 	amendStartStr  string
 	amendEndStr    string
 	amendNote      string
@@ -50,31 +52,49 @@ var amendCmd = &cobra.Command{
 	Short: "Create an amend event that updates an existing entry (append-only)",
 	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		var targetID string
-		if len(args) == 1 {
+		var (
+			targetID string
+			err      error
+		)
+		switch {
+		case len(args) == 1:
 			targetID = args[0]
-		} else if amendLast {
-			// pick last entry for today
-			now := nowLocal()
-			from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-			to := from
-			ents, err := loadEntries(from, to)
+		case amendSelect:
+			entries, loadErr := loadRecentEntriesForAmend()
+			if loadErr != nil {
+				cobra.CheckErr(fmt.Errorf("failed to load entries for selection: %w", loadErr))
+			}
+			if len(entries) == 0 {
+				cobra.CheckErr(fmt.Errorf("no entries found to select; add an entry first"))
+			}
+			var entry *Entry
+			entry, err = selectEntryForAmend(entries)
 			if err != nil {
-				cobra.CheckErr(fmt.Errorf("failed loading entries to locate last: %w", err))
-			}
-			if len(ents) == 0 {
-				cobra.CheckErr(fmt.Errorf("no entries found for today to amend"))
-			}
-			// pick last by start time
-			last := ents[0]
-			for _, e := range ents {
-				if e.Start.After(last.Start) {
-					last = e
+				if errors.Is(err, errSelectionCancelled) {
+					fmt.Println("Selection cancelled")
+					return
 				}
+				cobra.CheckErr(fmt.Errorf("failed to run selector: %w", err))
 			}
-			targetID = last.ID
-		} else {
-			cobra.CheckErr(fmt.Errorf("either provide an id or --last"))
+			if entry == nil {
+				fmt.Println("Selection cancelled")
+				return
+			}
+			targetID = entry.ID
+		case amendLast:
+			var entry *Entry
+			entry, err = findMostRecentEntryForAmend()
+			if err != nil {
+				cobra.CheckErr(err)
+			}
+			targetID = entry.ID
+		default:
+			var entry *Entry
+			entry, err = findMostRecentEntryForAmend()
+			if err != nil {
+				cobra.CheckErr(err)
+			}
+			targetID = entry.ID
 		}
 
 		meta := map[string]string{}
@@ -274,7 +294,8 @@ func parseBoolFlag(s string) (*bool, error) {
 
 func init() {
 	// amend flags
-	amendCmd.Flags().BoolVar(&amendLast, "last", false, "amend the last entry (instead of specifying an id)")
+	amendCmd.Flags().BoolVar(&amendLast, "last", false, "amend the most recent entry (default when no id is provided)")
+	amendCmd.Flags().BoolVar(&amendSelect, "select", false, "choose an entry interactively when no id is provided")
 	amendCmd.Flags().StringVar(&amendStartStr, "start", "", "new start time (RFC3339 or human-friendly formats)")
 	amendCmd.Flags().StringVar(&amendEndStr, "end", "", "new end time (RFC3339 or human-friendly formats)")
 	amendCmd.Flags().StringVar(&amendNote, "note", "", "note to append to the entry")
