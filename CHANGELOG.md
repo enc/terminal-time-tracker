@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.4 - 2025-10-27
+
+### Changed
+- Allow GoReleaser to tolerate the workflow-generated `VERSION` file.
+
+## 0.1.3 - 2025-10-27
+
+### Fixed
+- Updated the release workflow to drop the deprecated `--rm-dist` flag.
+
 ## 0.1.2 - 2025-10-27
 
 ### Changed

@@ -37,20 +37,6 @@ jobs:
           go-version: stable
           cache: true
 
-      - name: Create VERSION file from tag
-        # Create a VERSION file that matches the tag used to trigger the workflow.
-        # We prefer `github.ref_name` when available; otherwise fall back to parsing GITHUB_REF.
-        run: |
-          # github.ref_name is expanded by Actions runner if available
-          if [ -n "${{ github.ref_name }}" ] && [ "${{ github.ref_name }}" != "null" ]; then
-            TAG="${{ github.ref_name }}"
-          else
-            # GITHUB_REF is like refs/tags/v1.2.3 -> extract last segment
-            TAG="${GITHUB_REF##*/}"
-          fi
-          echo "$TAG" > VERSION
-          echo "Wrote VERSION: $(cat VERSION)"
-
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
