@@ -1,5 +1,16 @@
 # Changelog
 
+# Changelog
+
+## 0.2.0 - 2025-10-27
+
+### Added
+- `tt completion review`: interactive TUI to approve/ignore customers and projects for completion suggestions.
+
+### Changed
+- Completion now pulls from curated allow/ignore lists backed by config, hiding typos by default.
+- Documentation updated to describe the new review flow and curated completion behaviour.
+
 ## 0.1.4 - 2025-10-27
 
 ### Changed

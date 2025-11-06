@@ -163,7 +163,7 @@ Below are recommended ways to use and install completions for each shell.
   - Check permissions on the installed file (should be readable).
   - Make sure you have not disabled completion initialization in your shell config.
 - The Zsh automated installer adds lines to `~/.zshrc` only when it detects relevant lines are missing; it always asks for explicit confirmation before making changes.
-- The dynamic positional completion (customer/project suggestions) scans your journal files under `~/.tt/journal`. It's best-effort and tolerant of missing or unreadable files. If your journal is large and you notice latency in completion, consider manual installation of the completion script (the scanning only happens inside the shell completion runtime).
+- Completion suggestions are curated. Only customers and projects that you've approved are offered when tab-completing the positional arguments. Brand-new names won't appear until you accept them in the review workflow described below.
 
 - Alias-aware completion: `tt` supports named aliases (presets) which are persisted in `~/.tt/config.yaml`. Completion is aware of aliases in two ways:
   - The `--alias` flag itself supports completion and will suggest defined alias names when you press TAB (e.g., `tt start --alias <TAB>`).
@@ -186,6 +186,16 @@ tt start --alias dev <TAB>    # if you omit customer, alias' customer/project ar
 ```
 
 Note: alias-aware completion works once you have installed the shell completion script for your shell (see earlier examples for Zsh/Bash/Fish/PowerShell). The completion logic is best-effort and safe: it will not remove other suggestions from the list; it only ensures alias-provided values appear among the candidates (often at the front) so they are easy to select.
+
+### Curate completion names
+
+Run `tt completion review` to triage new customers and projects discovered in your journal files. The command opens a small TUI where you can:
+
+- Use `tab` to switch between the customer and project panes.
+- Move with arrow keys (or `j`/`k`), space to select multiple rows, and `a` / `enter` to approve or `i` to ignore the selected entries.
+- Changes are written back to `~/.tt/config.yaml` under `completion.allow.*` / `completion.ignore.*` so future completion requests stay clean.
+
+Alias-provided values still show up first even if they are not yet approved, making it easy to use an alias while you curate the canonical lists.
 
 ## Security / Safety
 - Generated completion scripts are just shell scripts. Inspect them if you are concerned before sourcing or installing.

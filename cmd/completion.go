@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -93,6 +92,20 @@ var completionCmd = &cobra.Command{
 			return nil
 		}
 
+		// If the first positional matches a subcommand (e.g. "review"), delegate to it.
+		if len(args) > 0 {
+			name := strings.ToLower(strings.TrimSpace(args[0]))
+			if sub := cmd.Commands(); len(sub) > 0 {
+				for _, child := range sub {
+					if child.Name() == name || child.HasAlias(name) {
+						child.SetArgs(args[1:])
+						child.SetContext(cmd.Context())
+						return child.Execute()
+					}
+				}
+			}
+		}
+
 		// Normal behavior: require a shell argument
 		if len(args) == 0 {
 			return fmt.Errorf("missing shell argument; expected one of: bash, zsh, fish, powershell (or use --install-zsh)")
@@ -137,9 +150,8 @@ func init() {
 // When an --alias flag is present, suggestions will include the alias' customer/project
 // where appropriate so users can rely on alias-injected values for completion.
 func customerProjectValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	// Try to read the --alias flag value (if present). In completion contexts the flag
-	// may be set earlier on the command line; this helps us include alias-provided
-	// customer/project in suggestions.
+	decisions := loadCompletionDecisions()
+
 	var aliasName string
 	if cmd != nil {
 		if f := cmd.Flags(); f != nil {
@@ -149,72 +161,31 @@ func customerProjectValidArgs(cmd *cobra.Command, args []string, toComplete stri
 		}
 	}
 
-	// No args -> complete customer. Include alias customer (if any) at the front.
-	// No args -> complete customer
+	var aliasCustomer, aliasProject string
+	if aliasName != "" {
+		if a, ok := getAlias(aliasName); ok {
+			aliasCustomer = strings.TrimSpace(a.Customer)
+			aliasProject = strings.TrimSpace(a.Project)
+		}
+	}
+
+	aliasCanonical := canonicalForCompletion(aliasCustomer)
+
 	if len(args) == 0 {
-		// Filter out any source customer names that have been merged away so they
-		// don't appear in the completion list. This also ensures canonical names
-		// appear when appropriate.
-		custs := FilterCustomersForCompletion(uniqueStringsFromJournal("customer"))
-		if aliasName != "" {
-			if a, ok := getAlias(aliasName); ok && a.Customer != "" {
-				// If the alias customer is a merged source, prefer its canonical name.
-				aliasCust := CanonicalCustomer(a.Customer)
-				found := false
-				for _, c := range custs {
-					if c == aliasCust {
-						found = true
-						break
-					}
-				}
-				if !found {
-					custs = append([]string{aliasCust}, custs...)
-				}
-			}
-		}
-		return filterPrefixAndSort(custs, toComplete), cobra.ShellCompDirectiveNoFileComp
+		custs := customerCompletionList(decisions, aliasCanonical, toComplete)
+		return custs, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	// One arg -> complete project (prefer projects for given customer).
-	// If the user didn't type a customer but provided --alias, use alias.Customer
-	// as context. Also include alias.Project (if present) among suggestions.
 	if len(args) == 1 {
-		cust := strings.TrimSpace(args[0])
-		var projs []string
-
-		// If customer not provided explicitly, and alias provides one, use it as context.
-		if cust == "" && aliasName != "" {
-			if a, ok := getAlias(aliasName); ok && a.Customer != "" {
-				cust = a.Customer
-			}
+		inputCustomer := strings.TrimSpace(args[0])
+		canonicalCustomer := canonicalForCompletion(inputCustomer)
+		if canonicalCustomer == "" && inputCustomer == "" {
+			canonicalCustomer = aliasCanonical
 		}
-
-		if cust != "" {
-			projs = projectsForCustomer(cust)
-		}
-
-		// If alias provides a specific project, prefer it by prepending it if missing.
-		if aliasName != "" {
-			if a, ok := getAlias(aliasName); ok && a.Project != "" {
-				found := false
-				for _, p := range projs {
-					if p == a.Project {
-						found = true
-						break
-					}
-				}
-				if !found {
-					projs = append([]string{a.Project}, projs...)
-				}
-			}
-		}
-
-		if len(projs) == 0 {
-			projs = uniqueStringsFromJournal("project")
-		}
-		return filterPrefixAndSort(projs, toComplete), cobra.ShellCompDirectiveNoFileComp
+		projs := projectCompletionList(decisions, canonicalCustomer, aliasProject, toComplete)
+		return projs, cobra.ShellCompDirectiveNoFileComp
 	}
-	// Otherwise, no completion
+
 	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
@@ -222,135 +193,112 @@ func customerProjectValidArgs(cmd *cobra.Command, args []string, toComplete stri
 // optional customer/project. We provide completion when args length is 2 or 3:
 // args == 2 => completing customer, args == 3 => completing project.
 func addCmdValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	// Before the optional customer (positions: 0=start,1=end), args length 2 means user is completing the customer
+	decisions := loadCompletionDecisions()
+
 	if len(args) <= 2 {
-		// Exclude merged source customer names from completion suggestions.
-		custs := FilterCustomersForCompletion(uniqueStringsFromJournal("customer"))
-		return filterPrefixAndSort(custs, toComplete), cobra.ShellCompDirectiveNoFileComp
+		custs := customerCompletionList(decisions, "", toComplete)
+		return custs, cobra.ShellCompDirectiveNoFileComp
 	}
-	// If user already provided customer (args[2]), complete project
+
 	if len(args) == 3 {
-		cust := strings.TrimSpace(args[2])
-		var projs []string
-		if cust != "" {
-			projs = projectsForCustomer(cust)
-		}
-		if len(projs) == 0 {
-			projs = uniqueStringsFromJournal("project")
-		}
-		return filterPrefixAndSort(projs, toComplete), cobra.ShellCompDirectiveNoFileComp
+		cust := canonicalForCompletion(strings.TrimSpace(args[2]))
+		projs := projectCompletionList(decisions, cust, "", toComplete)
+		return projs, cobra.ShellCompDirectiveNoFileComp
 	}
+
 	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
-// uniqueStringsFromJournal scans the journal directory and returns unique values
-// for the requested field: "customer" or "project".
-func uniqueStringsFromJournal(field string) []string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
+func canonicalForCompletion(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
 	}
-	jroot := filepath.Join(home, ".tt", "journal")
+	return CanonicalCustomer(name)
+}
+
+func customerCompletionList(decisions completionDecisions, aliasCustomer, prefix string) []string {
+	entries := map[string]string{}
+	for _, name := range decisions.allowedCustomers() {
+		canonical := canonicalForCompletion(name)
+		if canonical == "" {
+			continue
+		}
+		key := strings.ToLower(canonical)
+		if _, ok := entries[key]; ok {
+			continue
+		}
+		entries[key] = canonical
+	}
+
+	base := make([]string, 0, len(entries))
+	for _, v := range entries {
+		base = append(base, v)
+	}
+
+	filtered := filterPrefixAndSort(base, prefix)
+	return insertAliasCustomer(filtered, aliasCustomer, prefix)
+}
+
+func projectCompletionList(decisions completionDecisions, customer, aliasProject, prefix string) []string {
 	seen := map[string]struct{}{}
+	base := []string{}
 
-	// Use filepath.Walk and ignore errors so completion remains best-effort.
-	_ = filepath.Walk(jroot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // skip unreadable paths
-		}
-		if info.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(info.Name(), ".jsonl") {
-			return nil
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			return nil
-		}
-		defer f.Close()
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
+	appendProjects := func(list []string) {
+		for _, name := range list {
+			trimmed := strings.TrimSpace(name)
+			if trimmed == "" {
 				continue
 			}
-			var ev Event
-			if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			key := strings.ToLower(trimmed)
+			if _, ok := seen[key]; ok {
 				continue
 			}
-			if field == "customer" {
-				if v := strings.TrimSpace(ev.Customer); v != "" {
-					seen[v] = struct{}{}
-				}
-			} else {
-				if v := strings.TrimSpace(ev.Project); v != "" {
-					seen[v] = struct{}{}
-				}
-			}
+			seen[key] = struct{}{}
+			base = append(base, trimmed)
 		}
-		return nil
-	})
-
-	out := make([]string, 0, len(seen))
-	for k := range seen {
-		out = append(out, k)
 	}
-	sort.Strings(out)
+
+	appendProjects(decisions.allowedProjects(customer))
+	appendProjects(decisions.allowedProjects(""))
+
+	filtered := filterPrefixAndSort(base, prefix)
+	return insertAliasProject(filtered, aliasProject, prefix)
+}
+
+func insertAliasCustomer(list []string, aliasCustomer, prefix string) []string {
+	canonical := canonicalForCompletion(aliasCustomer)
+	if canonical == "" {
+		return list
+	}
+	if prefix != "" && !strings.HasPrefix(strings.ToLower(canonical), strings.ToLower(prefix)) {
+		return list
+	}
+	out := []string{canonical}
+	for _, item := range list {
+		if strings.EqualFold(item, canonical) {
+			continue
+		}
+		out = append(out, item)
+	}
 	return out
 }
 
-// projectsForCustomer returns projects that appeared with the given customer.
-func projectsForCustomer(customer string) []string {
-	if customer == "" {
-		return nil
+func insertAliasProject(list []string, aliasProject, prefix string) []string {
+	alias := strings.TrimSpace(aliasProject)
+	if alias == "" {
+		return list
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
+	if prefix != "" && !strings.HasPrefix(strings.ToLower(alias), strings.ToLower(prefix)) {
+		return list
 	}
-	jroot := filepath.Join(home, ".tt", "journal")
-	seen := map[string]struct{}{}
-
-	_ = filepath.Walk(jroot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
+	out := []string{alias}
+	for _, item := range list {
+		if strings.EqualFold(item, alias) {
+			continue
 		}
-		if info.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(info.Name(), ".jsonl") {
-			return nil
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			return nil
-		}
-		defer f.Close()
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-			var ev Event
-			if err := json.Unmarshal([]byte(line), &ev); err != nil {
-				continue
-			}
-			if strings.TrimSpace(ev.Customer) == customer {
-				if v := strings.TrimSpace(ev.Project); v != "" {
-					seen[v] = struct{}{}
-				}
-			}
-		}
-		return nil
-	})
-
-	out := make([]string, 0, len(seen))
-	for k := range seen {
-		out = append(out, k)
+		out = append(out, item)
 	}
-	sort.Strings(out)
 	return out
 }
 

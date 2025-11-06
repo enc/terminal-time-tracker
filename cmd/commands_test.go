@@ -3,12 +3,14 @@ package cmd
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // helper to create a simple journal file for a given day with provided events
@@ -71,6 +73,13 @@ func TestCustomerProjectValidArgsAndAddCmdValidArgs(t *testing.T) {
 		t.Fatalf("setenv HOME: %v", err)
 	}
 	defer os.Setenv("HOME", oldHome)
+
+	viper.Reset()
+	viper.Set("completion.allow.customers", []string{"Acme", "Beta"})
+	viper.Set("completion.allow.projects", map[string]any{
+		"Acme": []any{"Site", "Mobile"},
+		"Beta": []any{"App"},
+	})
 
 	// create a day with a few events containing customers/projects
 	day := time.Date(2026, 4, 5, 0, 0, 0, 0, time.UTC)
@@ -140,34 +149,37 @@ func TestFilterPrefixAndSort(t *testing.T) {
 	}
 }
 
-func TestUniqueStringsAndProjectsForCustomer(t *testing.T) {
-	tmp := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	if err := os.Setenv("HOME", tmp); err != nil {
-		t.Fatalf("setenv HOME: %v", err)
-	}
-	defer os.Setenv("HOME", oldHome)
+func TestCompletionListsHonorDecisions(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	viper.Reset()
+	mergedCustomerSet = nil
 
-	day := time.Date(2027, 8, 9, 0, 0, 0, 0, time.UTC)
-	evs := []Event{
-		{ID: "u1", Type: "add", TS: day.Add(1 * time.Hour), Customer: "C1", Project: "P1", Ref: day.Format(time.RFC3339) + ".." + day.Add(time.Hour).Format(time.RFC3339)},
-		{ID: "u2", Type: "add", TS: day.Add(2 * time.Hour), Customer: "C1", Project: "P2", Ref: day.Format(time.RFC3339) + ".." + day.Add(2*time.Hour).Format(time.RFC3339)},
-		{ID: "u3", Type: "add", TS: day.Add(3 * time.Hour), Customer: "C2", Project: "P3", Ref: day.Format(time.RFC3339) + ".." + day.Add(3*time.Hour).Format(time.RFC3339)},
-	}
-	writeJournalEvents(t, day, evs)
+	viper.Set("completion.allow.customers", []string{"Internal", "Acme"})
+	viper.Set("completion.ignore.customers", []string{"Interal"})
+	viper.Set("completion.allow.projects", map[string]any{
+		"Internal": []any{"Payroll", "Platform"},
+		"":         []any{"General"},
+	})
 
-	custs := uniqueStringsFromJournal("customer")
-	if !contains(custs, "C1") || !contains(custs, "C2") {
-		t.Fatalf("uniqueStringsFromJournal missing customers; got %v", custs)
+	dec := loadCompletionDecisions()
+	custs := customerCompletionList(dec, "", "")
+	if !reflect.DeepEqual(custs, []string{"Acme", "Internal"}) {
+		t.Fatalf("unexpected allowed customers: %v", custs)
 	}
-	p1 := projectsForCustomer("C1")
-	if !contains(p1, "P1") || !contains(p1, "P2") {
-		t.Fatalf("projectsForCustomer missing projects for C1; got %v", p1)
+
+	custsWithAlias := customerCompletionList(dec, "Acme", "a")
+	if len(custsWithAlias) == 0 || custsWithAlias[0] != "Acme" {
+		t.Fatalf("expected alias customer first, got %v", custsWithAlias)
 	}
-	// non-existing customer should return nil or empty slice
-	px := projectsForCustomer("Nope")
-	if len(px) != 0 {
-		t.Fatalf("expected no projects for nonexistent customer, got %v", px)
+
+	projs := projectCompletionList(dec, "Internal", "", "")
+	if !reflect.DeepEqual(projs, []string{"General", "Payroll", "Platform"}) {
+		t.Fatalf("unexpected project list: %v", projs)
+	}
+
+	projsAlias := projectCompletionList(dec, "Internal", "Platform", "pl")
+	if len(projsAlias) == 0 || projsAlias[0] != "Platform" {
+		t.Fatalf("expected alias project first, got %v", projsAlias)
 	}
 }
 
