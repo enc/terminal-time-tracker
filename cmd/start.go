@@ -8,12 +8,13 @@ import (
 )
 
 var (
-	startActivity string
-	startBillable bool
-	startTags     []string
-	startNote     string
-	startAt       string
-	startFor      string
+	startActivity     string
+	startBillable     bool
+	startTags         []string
+	startNote         string
+	startAt           string
+	startFor          string
+	startIgnoreBudget bool
 )
 
 var startCmd = &cobra.Command{
@@ -45,6 +46,18 @@ var startCmd = &cobra.Command{
 		id := IDGen()
 		billable := boolPtr(startBillable)
 		ev := NewStartEvent(id, customer, project, startActivity, billable, startNote, startTags, ts)
+
+		if !startIgnoreBudget {
+			budgets := toRuntimeBudgets(loadBudgets())
+			cand := budgetCandidate{Customer: customer, Project: project, Activity: startActivity, Start: ts}
+			warnings, berr := runBudgetChecks(budgets, cand, getRounding(), Now())
+			if berr != nil {
+				cobra.CheckErr(berr)
+			}
+			for _, w := range warnings {
+				fmt.Printf("%s\n", w)
+			}
+		}
 
 		// If user provided --for, schedule an auto-stop by adding meta["auto_stop"] with RFC3339 time.
 		if startFor != "" {
@@ -94,4 +107,5 @@ func init() {
 	startCmd.Flags().StringVarP(&startNote, "note", "n", "", "note for this entry")
 	startCmd.Flags().StringVar(&startAt, "at", "", "custom start time (accepts same formats as 'add', including relative expressions like 'now-30m' or '+15m')")
 	startCmd.Flags().StringVar(&startFor, "for", "", "auto-stop after duration (e.g. 25m)")
+	startCmd.Flags().BoolVar(&startIgnoreBudget, "ignore-budget", false, "skip budget checks for this start")
 }

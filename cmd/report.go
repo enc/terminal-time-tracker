@@ -10,11 +10,12 @@ import (
 )
 
 var (
-	repToday    bool
-	repWeek     bool
-	repRange    string
-	repBy       string
-	repDetailed bool
+	repToday      bool
+	repWeek       bool
+	repRange      string
+	repBy         string
+	repDetailed   bool
+	repWithBudget bool
 )
 
 type aggKey struct {
@@ -124,6 +125,30 @@ var reportCmd = &cobra.Command{
 		// Print groups using helper for consistent week/day formatting
 		fmt.Print(formatGroups(agg, groupEntries, repDetailed))
 
+		if repWithBudget {
+			budgets := toRuntimeBudgets(loadBudgets())
+			var lines []string
+			now := Now()
+			for _, b := range budgets {
+				if !budgetWindowOverlaps(b, from, to) {
+					continue
+				}
+				used := budgetUsage(b, entries, r, now)
+				remaining := b.TargetMin - used
+				if remaining < 0 {
+					remaining = 0
+				}
+				lines = append(lines, fmt.Sprintf("%s %s/%s [%s] target=%s used=%s remaining=%s enforce=%s", b.ID, b.Customer, b.Project, b.Activity, fmtHHMM(b.TargetMin), fmtHHMM(used), fmtHHMM(remaining), b.Enforce))
+			}
+			if len(lines) > 0 {
+				fmt.Println("Budgets:")
+				for _, l := range lines {
+					fmt.Printf("  - %s\n", l)
+				}
+				fmt.Println()
+			}
+		}
+
 		// Overall total (emphasized)
 		// Use heading color for the label and hours color for the numeric totals.
 		fmt.Printf("%sTOTAL:%s %s%s%s raw → %s%s%s rounded (+%dm)\n",
@@ -140,4 +165,5 @@ func init() {
 	reportCmd.Flags().StringVar(&repRange, "range", "", "custom range A..B (ISO or YYYY-MM-DDTHH:MM)")
 	reportCmd.Flags().StringVar(&repBy, "by", "customer,project,activity", "group by fields (comma-separated)")
 	reportCmd.Flags().BoolVar(&repDetailed, "detailed", false, "detailed report including per-entry notes and times")
+	reportCmd.Flags().BoolVar(&repWithBudget, "with-budget", false, "append budget usage to report output")
 }

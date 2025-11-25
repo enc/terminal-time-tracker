@@ -118,6 +118,53 @@ func (p *Parser) ParseReader(r io.Reader) ([]Entry, error) {
 	return p.parseReaderWithPath(r, "")
 }
 
+// ParseFiles parses multiple JSONL journal files as a single event stream. This is
+// useful when events (start/stop/amend/…) for a single logical entry span multiple
+// days/files. Errors are annotated with the originating path when possible.
+func (p *Parser) ParseFiles(paths []string) ([]Entry, error) {
+	if p == nil {
+		p = NewParser("")
+	}
+
+	var events []Event
+	for _, path := range paths {
+		f, err := os.Open(path)
+		if err != nil {
+			// missing files are tolerated (matching ParseFile behaviour)
+			continue
+		}
+		scanner := bufio.NewScanner(f)
+		line := 0
+		for scanner.Scan() {
+			line++
+			txt := strings.TrimSpace(scanner.Text())
+			if txt == "" {
+				continue
+			}
+			var ev Event
+			if err := json.Unmarshal([]byte(txt), &ev); err != nil {
+				pe := &ParseError{Path: path, Line: line, Err: err}
+				if p.Strict {
+					f.Close()
+					return nil, pe
+				}
+				continue
+			}
+			events = append(events, ev)
+		}
+		if err := scanner.Err(); err != nil {
+			f.Close()
+			if p.Strict {
+				return nil, err
+			}
+			continue
+		}
+		f.Close()
+	}
+
+	return p.reconstruct(events, "")
+}
+
 // parseReaderWithPath is the internal implementation that can attach a path to ParseErrors.
 // This implementation is append-only friendly: it collects base events (start/stop/add/notes)
 // and also collects correction events (amend/split/merge). After building base entries it applies
@@ -151,6 +198,21 @@ func (p *Parser) parseReaderWithPath(r io.Reader, path string) ([]Entry, error) 
 		return nil, err
 	}
 
+	entries, err := p.reconstruct(events, path)
+	if err != nil {
+		return nil, err
+	}
+
+	// set Source on each entry
+	for i := range entries {
+		entries[i].Source = path
+	}
+	return entries, nil
+}
+
+// reconstruct performs deterministic entry reconstruction from the provided events slice.
+// It is shared by both single-file and multi-file parsing paths.
+func (p *Parser) reconstruct(events []Event, path string) ([]Entry, error) {
 	// Sort events chronologically to ensure deterministic reconstruction.
 	sort.Slice(events, func(i, j int) bool { return events[i].TS.Before(events[j].TS) })
 

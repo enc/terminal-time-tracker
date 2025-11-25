@@ -142,6 +142,45 @@ func TestLoadEntries_Reconstruction(t *testing.T) {
 	}
 }
 
+func TestLoadEntries_CrossDaySpan(t *testing.T) {
+	tmp := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", tmp); err != nil {
+		t.Fatalf("Setenv HOME failed: %v", err)
+	}
+	defer os.Setenv("HOME", oldHome)
+
+	viper.Set("timezone", "UTC")
+
+	day := time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC)
+	start := day.Add(-5 * time.Minute) // 23:55 previous day
+	stop := day.Add(10 * time.Minute)  // 00:10 same day
+
+	evStart := Event{ID: "s1", Type: "start", TS: start, Customer: "ACME", Project: "P", Activity: "dev", Billable: boolPtr(true)}
+	if err := writeEvent(evStart); err != nil {
+		t.Fatalf("writeEvent start failed: %v", err)
+	}
+	evStop := Event{ID: "st1", Type: "stop", TS: stop}
+	if err := writeEvent(evStop); err != nil {
+		t.Fatalf("writeEvent stop failed: %v", err)
+	}
+
+	entries, err := loadEntries(day, day)
+	if err != nil {
+		t.Fatalf("loadEntries returned error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry spanning midnight, got %d", len(entries))
+	}
+	e := entries[0]
+	if !e.Start.Equal(start) {
+		t.Fatalf("start mismatch: got %v want %v", e.Start, start)
+	}
+	if e.End == nil || !e.End.Equal(stop) {
+		t.Fatalf("end mismatch: got %v want %v", e.End, stop)
+	}
+}
+
 func TestDurationAndFmtHHMM(t *testing.T) {
 	start := time.Date(2025, 1, 1, 9, 0, 0, 0, time.UTC)
 	end := start.Add(2*time.Hour + 45*time.Minute)

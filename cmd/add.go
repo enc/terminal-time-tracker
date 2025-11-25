@@ -8,10 +8,11 @@ import (
 )
 
 var (
-	addActivity string
-	addBillable bool
-	addTags     []string
-	addNote     string
+	addActivity     string
+	addBillable     bool
+	addTags         []string
+	addNote         string
+	addIgnoreBudget bool
 )
 
 var addCmd = &cobra.Command{
@@ -51,6 +52,18 @@ var addCmd = &cobra.Command{
 
 		id := IDGen()
 		ev := NewAddEvent(id, customer, project, addActivity, boolPtr(addBillable), addNote, addTags, st, en)
+
+		if !addIgnoreBudget {
+			budgets := toRuntimeBudgets(loadBudgets())
+			cand := budgetCandidate{Customer: customer, Project: project, Activity: addActivity, Start: st, End: &en}
+			warnings, berr := runBudgetChecks(budgets, cand, getRounding(), Now())
+			if berr != nil {
+				cobra.CheckErr(berr)
+			}
+			for _, w := range warnings {
+				fmt.Printf("%s\n", w)
+			}
+		}
 		if err := Writer.WriteEvent(ev); err != nil {
 			cobra.CheckErr(err)
 		}
@@ -63,4 +76,5 @@ func init() {
 	addCmd.Flags().BoolVarP(&addBillable, "billable", "b", true, "mark as billable (default true)")
 	addCmd.Flags().StringSliceVarP(&addTags, "tag", "t", []string{}, "tag(s)")
 	addCmd.Flags().StringVarP(&addNote, "note", "n", "", "note")
+	addCmd.Flags().BoolVar(&addIgnoreBudget, "ignore-budget", false, "skip budget checks for this add")
 }

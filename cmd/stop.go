@@ -7,6 +7,7 @@ import (
 )
 
 var stopAt string
+var stopIgnoreBudget bool
 
 var stopCmd = &cobra.Command{
 	Use:   "stop",
@@ -32,6 +33,30 @@ var stopCmd = &cobra.Command{
 		// will produce an appropriate fallback message.
 		running, _ := LastOpenEntryAt(ts)
 
+		if running != nil && !stopIgnoreBudget {
+			budgets := toRuntimeBudgets(loadBudgets())
+			cand := budgetCandidate{Customer: running.Customer, Project: running.Project, Activity: running.Activity, Start: running.Start, End: &ts}
+			relevant := filterBudgetsForCandidate(budgets, cand)
+			if len(relevant) > 0 {
+				from, to := windowForBudgets(relevant, cand)
+				entries, _ := loadEntries(from, to)
+				var filtered []Entry
+				for _, e := range entries {
+					if e.ID == running.ID {
+						continue // avoid double-counting the running entry; candidate covers it
+					}
+					filtered = append(filtered, e)
+				}
+				warnings, berr := checkBudgets(relevant, filtered, cand, getRounding(), ts)
+				if berr != nil {
+					fmt.Printf("Budget limit reached: %v\n", berr)
+				}
+				for _, w := range warnings {
+					fmt.Printf("%s\n", w)
+				}
+			}
+		}
+
 		ev := NewStopEvent(IDGen(), ts)
 		if err := Writer.WriteEvent(ev); err != nil {
 			cobra.CheckErr(fmt.Errorf("failed to write stop event: %w", err))
@@ -44,4 +69,5 @@ var stopCmd = &cobra.Command{
 
 func init() {
 	stopCmd.Flags().StringVar(&stopAt, "at", "", "custom stop time (accepts same formats as 'add' and 'start', including relative expressions like 'now-30m' or '+15m')")
+	stopCmd.Flags().BoolVar(&stopIgnoreBudget, "ignore-budget", false, "skip budget checks for this stop")
 }

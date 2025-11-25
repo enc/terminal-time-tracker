@@ -357,29 +357,47 @@ func loadEntries(from, to time.Time) ([]Entry, error) {
 	// Create a journal parser using configured timezone (falls back to Local inside the parser).
 	p := journal.NewParser(viper.GetString("timezone"))
 
+	// Build a slice of journal paths covering the requested window plus a one-day
+	// lookback and lookahead to capture entries that span midnight.
+	var paths []string
+	startDay := from.AddDate(0, 0, -1)
+	endDay := to.AddDate(0, 0, 1)
+	for d := startDay; !d.After(endDay); d = d.AddDate(0, 0, 1) {
+		paths = append(paths, journalPathFor(d))
+	}
+
+	ents, err := p.ParseFiles(paths)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter to entries that intersect the requested window and map to cmd.Entry.
 	var entries []Entry
-	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
-		pth := journalPathFor(d)
-		ents, err := p.ParseFile(pth)
-		if err != nil {
-			// Preserve previous behaviour of skipping missing/malformed files in non-strict mode.
+	for _, je := range ents {
+		// Skip entries entirely outside the window.
+		if je.End != nil && je.End.Before(from) {
 			continue
 		}
-		// Map journal.Entry -> cmd.Entry
-		for _, je := range ents {
-			e := Entry{
-				ID:       je.ID,
-				Start:    je.Start,
-				End:      je.End,
-				Customer: je.Customer,
-				Project:  je.Project,
-				Activity: je.Activity,
-				Billable: je.Billable,
-				Notes:    je.Notes,
-				Tags:     je.Tags,
-			}
-			entries = append(entries, e)
+		if je.End == nil && je.Start.After(to) {
+			continue
 		}
+		if je.End != nil && je.End.Before(je.Start) {
+			continue
+		}
+
+		copyEnd := je.End
+		e := Entry{
+			ID:       je.ID,
+			Start:    je.Start,
+			End:      copyEnd,
+			Customer: je.Customer,
+			Project:  je.Project,
+			Activity: je.Activity,
+			Billable: je.Billable,
+			Notes:    je.Notes,
+			Tags:     je.Tags,
+		}
+		entries = append(entries, e)
 	}
 
 	// Ensure deterministic ordering across days

@@ -7,11 +7,12 @@ import (
 )
 
 var (
-	switchActivity string
-	switchBillable bool
-	switchTags     []string
-	switchNote     string
-	switchAt       string
+	switchActivity     string
+	switchBillable     bool
+	switchTags         []string
+	switchNote         string
+	switchAt           string
+	switchIgnoreBudget bool
 )
 
 var switchCmd = &cobra.Command{
@@ -32,23 +33,35 @@ var switchCmd = &cobra.Command{
 			}
 		}
 
-		// Reconstruct the running entry at the switch time so we can report what was stopped.
-		// Best-effort: when reconstruction fails, running will be nil and output will reflect that.
-		running, _ := LastOpenEntryAt(ts)
-
-		// stop - ensure we handle any error (use ts so stop/start are aligned)
-		stopEv := NewStopEvent(IDGen(), ts)
-		if err := Writer.WriteEvent(stopEv); err != nil {
-			cobra.CheckErr(fmt.Errorf("failed to write stop event: %w", err))
-		}
-
-		// start
+		// Determine new entry scope
 		customer, project := "", ""
 		if len(args) > 0 {
 			customer = args[0]
 		}
 		if len(args) > 1 {
 			project = args[1]
+		}
+
+		// Reconstruct the running entry at the switch time so we can report what was stopped.
+		// Best-effort: when reconstruction fails, running will be nil and output will reflect that.
+		running, _ := LastOpenEntryAt(ts)
+
+		if !switchIgnoreBudget {
+			budgets := toRuntimeBudgets(loadBudgets())
+			cand := budgetCandidate{Customer: customer, Project: project, Activity: switchActivity, Start: ts}
+			warnings, berr := runBudgetChecks(budgets, cand, getRounding(), Now())
+			if berr != nil {
+				cobra.CheckErr(berr)
+			}
+			for _, w := range warnings {
+				fmt.Printf("%s\n", w)
+			}
+		}
+
+		// stop - ensure we handle any error (use ts so stop/start are aligned)
+		stopEv := NewStopEvent(IDGen(), ts)
+		if err := Writer.WriteEvent(stopEv); err != nil {
+			cobra.CheckErr(fmt.Errorf("failed to write stop event: %w", err))
 		}
 		id := IDGen()
 		billable := boolPtr(switchBillable)
@@ -68,4 +81,5 @@ func init() {
 	switchCmd.Flags().StringSliceVarP(&switchTags, "tag", "t", []string{}, "add tag(s)")
 	switchCmd.Flags().StringVarP(&switchNote, "note", "n", "", "note for new entry")
 	switchCmd.Flags().StringVar(&switchAt, "at", "", "custom switch time (accepts same formats as 'add', including relative expressions like 'now-30m' or '+15m')")
+	switchCmd.Flags().BoolVar(&switchIgnoreBudget, "ignore-budget", false, "skip budget checks for this switch")
 }
