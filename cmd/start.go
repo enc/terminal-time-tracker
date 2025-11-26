@@ -54,9 +54,7 @@ var startCmd = &cobra.Command{
 			if berr != nil {
 				cobra.CheckErr(berr)
 			}
-			for _, w := range warnings {
-				fmt.Printf("%s\n", w)
-			}
+			printBudgetWarnings(warnings)
 		}
 
 		// If user provided --for, schedule an auto-stop by adding meta["auto_stop"] with RFC3339 time.

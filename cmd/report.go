@@ -133,12 +133,8 @@ var reportCmd = &cobra.Command{
 				if !budgetWindowOverlaps(b, from, to) {
 					continue
 				}
-				used := budgetUsage(b, entries, r, now)
-				remaining := b.TargetMin - used
-				if remaining < 0 {
-					remaining = 0
-				}
-				lines = append(lines, fmt.Sprintf("%s %s/%s [%s] target=%s used=%s remaining=%s enforce=%s", b.ID, b.Customer, b.Project, b.Activity, fmtHHMM(b.TargetMin), fmtHHMM(used), fmtHHMM(remaining), b.Enforce))
+				used := budgetUsage(b, entries, r, now, &from, &to)
+				lines = append(lines, formatBudgetLine(b, used))
 			}
 			if len(lines) > 0 {
 				fmt.Println("Budgets:")

@@ -53,9 +53,7 @@ var switchCmd = &cobra.Command{
 			if berr != nil {
 				cobra.CheckErr(berr)
 			}
-			for _, w := range warnings {
-				fmt.Printf("%s\n", w)
-			}
+			printBudgetWarnings(warnings)
 		}
 
 		// stop - ensure we handle any error (use ts so stop/start are aligned)

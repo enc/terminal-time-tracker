@@ -49,11 +49,9 @@ var stopCmd = &cobra.Command{
 				}
 				warnings, berr := checkBudgets(relevant, filtered, cand, getRounding(), ts)
 				if berr != nil {
-					fmt.Printf("Budget limit reached: %v\n", berr)
+					fmt.Printf("%sBUDGET:%s %v\n", ansiWarn, ansiReset, berr)
 				}
-				for _, w := range warnings {
-					fmt.Printf("%s\n", w)
-				}
+				printBudgetWarnings(warnings)
 			}
 		}
 

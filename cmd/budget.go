@@ -45,6 +45,11 @@ var (
 	budgetSetEnforce  string
 	budgetSetNote     string
 	budgetSetID       string
+
+	budgetEditHours   float64
+	budgetEditRange   string
+	budgetEditEnforce string
+	budgetEditNote    string
 )
 
 var budgetCmd = &cobra.Command{
@@ -166,30 +171,8 @@ var budgetListCmd = &cobra.Command{
 		})
 
 		for _, b := range runtimeBudgets {
-			used := budgetUsage(b, entries, roundCfg, now)
-			remaining := b.TargetMin - used
-			if remaining < 0 {
-				remaining = 0
-			}
-			window := "open"
-			if b.Start != nil && b.End != nil {
-				window = fmt.Sprintf("%s..%s", b.Start.Format("2006-01-02"), b.End.Format("2006-01-02"))
-			} else if b.Start != nil {
-				window = fmt.Sprintf("%s..", b.Start.Format("2006-01-02"))
-			} else if b.End != nil {
-				window = fmt.Sprintf("..%s", b.End.Format("2006-01-02"))
-			}
-			fmt.Printf("%s: %s/%s [%s] hours=%.2f used=%s remaining=%s window=%s enforce=%s\n",
-				b.ID,
-				b.Customer,
-				b.Project,
-				b.Activity,
-				b.Hours,
-				fmtHHMM(used),
-				fmtHHMM(remaining),
-				window,
-				b.Enforce,
-			)
+			used := budgetUsage(b, entries, roundCfg, now, nil, nil)
+			fmt.Printf("%s\n", formatBudgetLine(b, used))
 		}
 	},
 }
@@ -220,9 +203,114 @@ var budgetRmCmd = &cobra.Command{
 	},
 }
 
+var budgetShowCmd = &cobra.Command{
+	Use:   "show <id>",
+	Short: "Show budget details",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		budgets := loadBudgets()
+		id := args[0]
+		for _, b := range budgets {
+			if b.ID == id {
+				r := toRuntimeBudgets([]Budget{b})[0]
+				from := Now().AddDate(0, 0, -30)
+				to := Now()
+				if r.Start != nil {
+					from = *r.Start
+				}
+				if r.End != nil {
+					to = *r.End
+				}
+				entries, _ := loadEntries(from, to)
+				used := budgetUsage(r, entries, getRounding(), Now(), &from, &to)
+				fmt.Println(formatBudgetDetail(r, used))
+				return
+			}
+		}
+		cobra.CheckErr(fmt.Errorf("budget %s not found", id))
+	},
+}
+
+var budgetEditCmd = &cobra.Command{
+	Use:   "edit <id>",
+	Short: "Edit an existing budget",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		budgets := loadBudgets()
+		id := args[0]
+		var found *Budget
+		for i := range budgets {
+			if budgets[i].ID == id {
+				found = &budgets[i]
+				break
+			}
+		}
+		if found == nil {
+			cobra.CheckErr(fmt.Errorf("budget %s not found", id))
+		}
+
+		changed := false
+		if cmd.Flags().Changed("customer") {
+			found.Customer = budgetSetCustomer
+			changed = true
+		}
+		if cmd.Flags().Changed("project") {
+			found.Project = budgetSetProject
+			changed = true
+		}
+		if cmd.Flags().Changed("activity") {
+			found.Activity = budgetSetActivity
+			changed = true
+		}
+		if cmd.Flags().Changed("hours") {
+			if budgetEditHours <= 0 {
+				cobra.CheckErr(fmt.Errorf("--hours must be > 0"))
+			}
+			found.Hours = budgetEditHours
+			changed = true
+		}
+		if cmd.Flags().Changed("enforce") {
+			if budgetEditEnforce != "warn" && budgetEditEnforce != "block" && budgetEditEnforce != "soft-cap" {
+				cobra.CheckErr(fmt.Errorf("invalid --enforce value: %s", budgetEditEnforce))
+			}
+			found.Enforce = budgetEditEnforce
+			changed = true
+		}
+		if cmd.Flags().Changed("note") {
+			found.Note = budgetEditNote
+			changed = true
+		}
+		if cmd.Flags().Changed("range") {
+			parts := strings.Split(budgetEditRange, "..")
+			if len(parts) != 2 {
+				cobra.CheckErr(fmt.Errorf("--range must be A..B"))
+			}
+			found.StartsAt, found.EndsAt = "", ""
+			if parts[0] != "" {
+				st := mustParseTimeLocal(parts[0])
+				found.StartsAt = st.Format(time.RFC3339)
+			}
+			if parts[1] != "" {
+				en := mustParseTimeLocal(parts[1])
+				found.EndsAt = en.Format(time.RFC3339)
+			}
+			changed = true
+		}
+
+		if !changed {
+			fmt.Println("no changes applied")
+			return
+		}
+		if err := saveBudgets(budgets); err != nil {
+			cobra.CheckErr(fmt.Errorf("failed to save budgets: %w", err))
+		}
+		fmt.Printf("budget %s updated\n", id)
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(budgetCmd)
-	budgetCmd.AddCommand(budgetSetCmd, budgetListCmd, budgetRmCmd)
+	budgetCmd.AddCommand(budgetSetCmd, budgetListCmd, budgetRmCmd, budgetShowCmd, budgetEditCmd)
 
 	budgetSetCmd.Flags().StringVar(&budgetSetCustomer, "customer", "", "customer (required)")
 	budgetSetCmd.Flags().StringVar(&budgetSetProject, "project", "", "project")
@@ -232,6 +320,14 @@ func init() {
 	budgetSetCmd.Flags().StringVar(&budgetSetEnforce, "enforce", "warn", "enforcement mode: warn|block|soft-cap")
 	budgetSetCmd.Flags().StringVar(&budgetSetNote, "note", "", "note")
 	budgetSetCmd.Flags().StringVar(&budgetSetID, "id", "", "explicit budget id (update when exists)")
+
+	budgetEditCmd.Flags().StringVar(&budgetSetCustomer, "customer", "", "customer")
+	budgetEditCmd.Flags().StringVar(&budgetSetProject, "project", "", "project")
+	budgetEditCmd.Flags().StringVar(&budgetSetActivity, "activity", "", "activity")
+	budgetEditCmd.Flags().Float64Var(&budgetEditHours, "hours", 0, "budget hours")
+	budgetEditCmd.Flags().StringVar(&budgetEditRange, "range", "", "time window A..B (either side optional)")
+	budgetEditCmd.Flags().StringVar(&budgetEditEnforce, "enforce", "", "enforcement mode: warn|block|soft-cap")
+	budgetEditCmd.Flags().StringVar(&budgetEditNote, "note", "", "note")
 }
 
 // helpers -------------------------------------------------------------------
@@ -269,6 +365,51 @@ func toRuntimeBudgets(b []Budget) []budgetRuntime {
 }
 
 func timePtr(t time.Time) *time.Time { return &t }
+
+func budgetWindowString(b budgetRuntime) string {
+	if b.Start != nil && b.End != nil {
+		return fmt.Sprintf("%s..%s", b.Start.Format("2006-01-02"), b.End.Format("2006-01-02"))
+	}
+	if b.Start != nil {
+		return fmt.Sprintf("%s..", b.Start.Format("2006-01-02"))
+	}
+	if b.End != nil {
+		return fmt.Sprintf("..%s", b.End.Format("2006-01-02"))
+	}
+	return "open"
+}
+
+func formatBudgetLine(b budgetRuntime, used int) string {
+	remaining := b.TargetMin - used
+	if remaining < 0 {
+		remaining = 0
+	}
+	status := "on track"
+	if used >= b.TargetMin {
+		status = fmt.Sprintf("over by %s", fmtHHMM(used-b.TargetMin))
+	}
+	return fmt.Sprintf("%s %s/%s [%s] target=%.2fh used=%s remaining=%s window=%s enforce=%s (%s)",
+		b.ID,
+		b.Customer,
+		b.Project,
+		b.Activity,
+		b.Hours,
+		fmtHHMM(used),
+		fmtHHMM(remaining),
+		budgetWindowString(b),
+		b.Enforce,
+		status,
+	)
+}
+
+func formatBudgetDetail(b budgetRuntime, used int) string {
+	remaining := b.TargetMin - used
+	if remaining < 0 {
+		remaining = 0
+	}
+	return fmt.Sprintf("id: %s\nscope: %s / %s [%s]\nwindow: %s\nhours: %.2f\nenforce: %s\nnote: %s\nused: %s\nremaining: %s",
+		b.ID, b.Customer, b.Project, b.Activity, budgetWindowString(b), b.Hours, b.Enforce, b.Note, fmtHHMM(used), fmtHHMM(remaining))
+}
 
 func loadBudgets() []Budget {
 	// prefer current viper state
@@ -390,7 +531,7 @@ func checkBudgets(budgets []budgetRuntime, entries []Entry, cand budgetCandidate
 			continue
 		}
 
-		used := budgetUsage(b, entries, rounding, now)
+		used := budgetUsage(b, entries, rounding, now, nil, nil)
 		candMin := 0
 		if cand.End != nil {
 			candMin = roundMinutes(int(cand.End.Sub(cand.Start).Minutes()), rounding)
@@ -401,11 +542,12 @@ func checkBudgets(budgets []budgetRuntime, entries []Entry, cand budgetCandidate
 			continue
 		}
 
+		remaining := b.TargetMin - projected
 		if projected >= b.TargetMin && strings.EqualFold(b.Enforce, "block") {
-			return warnings, fmt.Errorf("budget %s exceeded for %s/%s [%s]: target=%s used=%s", b.ID, b.Customer, b.Project, b.Activity, fmtHHMM(b.TargetMin), fmtHHMM(projected))
+			return warnings, fmt.Errorf("budget %s exceeded for %s/%s [%s]: target=%s projected=%s remaining=%s", b.ID, b.Customer, b.Project, b.Activity, fmtHHMM(b.TargetMin), fmtHHMM(projected), fmtHHMM(remaining))
 		}
 		if projected >= b.TargetMin {
-			msg := fmt.Sprintf("budget %s near/exceeded: %s/%s [%s] target=%s used=%s", b.ID, b.Customer, b.Project, b.Activity, fmtHHMM(b.TargetMin), fmtHHMM(projected))
+			msg := fmt.Sprintf("budget %s near/exceeded: %s/%s [%s] target=%s projected=%s remaining=%s", b.ID, b.Customer, b.Project, b.Activity, fmtHHMM(b.TargetMin), fmtHHMM(projected), fmtHHMM(remaining))
 			warnings = append(warnings, msg)
 		}
 	}
@@ -503,7 +645,7 @@ func budgetWindowOverlaps(b budgetRuntime, start, end time.Time) bool {
 	return true
 }
 
-func budgetUsage(b budgetRuntime, entries []Entry, rounding Rounding, now time.Time) int {
+func budgetUsage(b budgetRuntime, entries []Entry, rounding Rounding, now time.Time, windowStart, windowEnd *time.Time) int {
 	used := 0
 	for _, e := range entries {
 		if ok, _ := budgetMatchesScope(b, e.Customer, e.Project, e.Activity); !ok {
@@ -528,6 +670,18 @@ func budgetUsage(b budgetRuntime, entries []Entry, rounding Rounding, now time.T
 		if b.End != nil && segEnd.After(*b.End) {
 			segEnd = *b.End
 		}
+		if windowStart != nil && segEnd.Before(*windowStart) {
+			continue
+		}
+		if windowEnd != nil && segStart.After(*windowEnd) {
+			continue
+		}
+		if windowStart != nil && segStart.Before(*windowStart) {
+			segStart = *windowStart
+		}
+		if windowEnd != nil && segEnd.After(*windowEnd) {
+			segEnd = *windowEnd
+		}
 		if !segEnd.After(segStart) {
 			continue
 		}
@@ -538,6 +692,12 @@ func budgetUsage(b budgetRuntime, entries []Entry, rounding Rounding, now time.T
 		used += roundMinutes(mins, rounding)
 	}
 	return used
+}
+
+func printBudgetWarnings(ws []string) {
+	for _, w := range ws {
+		fmt.Printf("%sBUDGET:%s %s\n", ansiWarn, ansiReset, w)
+	}
 }
 
 // persistence reuse ---------------------------------------------------------

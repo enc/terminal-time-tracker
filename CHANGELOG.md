@@ -1,6 +1,16 @@
 # Changelog
 
-# Changelog
+## 0.2.0 - 2025-10-27
+
+## 0.3.0 - 2025-10-27
+
+### Added
+- Budget management commands (`tt budget set/ls/show/edit/rm`) with warn/block enforcement during start/switch/add and reporting via `--with-budget`.
+- Budget-aware warnings for stop/report flows with consistent colored messaging.
+
+### Changed
+- Entry reconstruction now spans multiple journal files to handle cross-midnight sessions and cross-day amendments.
+- README updated with budget usage examples and demos.
 
 ## 0.2.0 - 2025-10-27
 

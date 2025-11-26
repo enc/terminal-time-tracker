@@ -60,9 +60,7 @@ var addCmd = &cobra.Command{
 			if berr != nil {
 				cobra.CheckErr(berr)
 			}
-			for _, w := range warnings {
-				fmt.Printf("%s\n", w)
-			}
+			printBudgetWarnings(warnings)
 		}
 		if err := Writer.WriteEvent(ev); err != nil {
 			cobra.CheckErr(err)

@@ -18,7 +18,7 @@ func TestBudgetUsageAndChecks(t *testing.T) {
 	end := start.Add(60 * time.Minute)
 	entries := []Entry{{ID: "e1", Customer: "ACME", Project: "Web", Activity: "dev", Start: start, End: &end, Billable: true}}
 
-	used := budgetUsage(br, entries, round, end)
+	used := budgetUsage(br, entries, round, end, nil, nil)
 	if used != 60 {
 		t.Fatalf("expected used=60, got %d", used)
 	}
@@ -53,7 +53,7 @@ func TestBudgetWindowFiltering(t *testing.T) {
 	br := toRuntimeBudgets([]Budget{b})[0]
 
 	entries := []Entry{{ID: "e1", Customer: "ACME", Start: start, End: &end}}
-	used := budgetUsage(br, entries, round, end)
+	used := budgetUsage(br, entries, round, end, nil, nil)
 	if used != 30 {
 		t.Fatalf("expected 30m used inside window, got %d", used)
 	}

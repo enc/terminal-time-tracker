@@ -11,6 +11,7 @@ A minimal, ready-to-run Go skeleton implementing the core commands:
 - `tt report [--today|--week|--range A..B] [--by fields]`
 - `tt audit verify`
 - `tt completion` (generate shell completion; see below)
+- `tt budget set/ls/show/edit/rm` (configure time budgets and alerts; see Budgets section)
 
 The `--at` flag (available on `start` and `switch`) accepts both absolute timestamps and a variety of convenient relative expressions. Supported forms include:
 - RFC3339 / absolute datetimes (e.g. `2025-10-20T08:00:00Z`, `2025-10-20 08:00`)
@@ -67,7 +68,18 @@ sleep 2
 ./tt ls --today
 ./tt report --today --by customer,project,activity
 ./tt audit verify
+# set a budget and see it in the report
+./tt budget set --customer acme --project mobilize:foundation --hours 40 --enforce warn
+./tt report --week --with-budget
 ```
+
+## Budgets & alerts
+
+- Define budgets per customer/project/activity: `tt budget set --customer Acme --project Website --hours 40 --range 2025-01-01..2025-01-31 --enforce warn`
+- Inspect budgets: `tt budget ls`, `tt budget show <id>`, `tt budget edit <id> --hours 60`, `tt budget rm <id>`
+- Booking guards: `start`, `switch`, and `add` will warn or block when projected time crosses a blocking budget; bypass with `--ignore-budget` if needed. `stop` surfaces warnings for overruns.
+- Reports: add `--with-budget` to `tt report` to append budget usage summaries for the selected window.
+- Ranges are respected: budgets only count time inside their window; projections include the pending entry’s rounded duration.
 
 ---
 
