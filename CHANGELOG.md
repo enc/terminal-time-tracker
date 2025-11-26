@@ -1,5 +1,17 @@
 # Changelog
 
+# Changelog
+
+## 0.4.0 - 2025-11-26
+
+### Added
+- `tt export ics` command to write per-day iCalendar files with customer/project/activity, notes, billable flag, and rounded durations.
+- Rounding-aware allocation across cross-midnight entries so per-day segments sum to the configured rounded total.
+- Documentation for ICS export and examples for weekly and range-based calendar generation.
+
+### Changed
+- Bumped VERSION to 0.4.0.
+
 ## 0.3.0 - 2025-10-27
 
 ### Added

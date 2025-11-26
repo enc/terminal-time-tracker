@@ -9,6 +9,7 @@ A minimal, ready-to-run Go skeleton implementing the core commands:
 - `tt add <start> <end> [customer] [project]` (retro-add, ISO8601 or 'YYYY-MM-DDTHH:MM')
 - `tt ls [--today|--range A..B]`
 - `tt report [--today|--week|--range A..B] [--by fields]`
+- `tt export ics [--today|--week|--range A..B] [--out dir]` (per-day iCalendar export)
 - `tt audit verify`
 - `tt completion` (generate shell completion; see below)
 - `tt budget set/ls/show/edit/rm` (configure time budgets and alerts; see Budgets section)
@@ -71,7 +72,19 @@ sleep 2
 # set a budget and see it in the report
 ./tt budget set --customer acme --project mobilize:foundation --hours 40 --enforce warn
 ./tt report --week --with-budget
+./tt export ics --week --out ./cal
 ```
+
+## Calendar export (ICS)
+
+- Export finished entries to per-day iCalendar files that import cleanly into popular calendar apps:
+  ```bash
+  tt export ics --week --out ./cal
+  tt export ics --range 2025-02-01..2025-02-15 --out ~/cal
+  ```
+- Each day is written as `YYYY-MM-DD.ics` using your configured timezone and rounding settings.
+- Customer, project, activity, billable flag, notes, and rounded duration are embedded in the event summary/description.
+- Entries spanning midnight are split per day while preserving the rounded total duration by proportionally allocating rounded time across the split segments.
 
 ## Budgets & alerts
 
