@@ -209,19 +209,6 @@ Run `tt completion review` to triage new customers and projects discovered in yo
 
 Alias-provided values still show up first even if they are not yet approved, making it easy to use an alias while you curate the canonical lists.
 
-## Security / Safety
-- Generated completion scripts are just shell scripts. Inspect them if you are concerned before sourcing or installing.
-- The `--install-zsh` helper modifies `~/.zshrc` only after asking for confirmation; it appends a clearly marked block so you can easily remove it later.
-
----
-
-If you'd like, I can:
-- Add a non-interactive `--yes` switch for `--install-zsh` (useful for scripted installs).
-- Add automated installers for Bash/Fish/PowerShell as well (these require careful behavior around system vs user locations).
-- Add caching to completion suggestions to improve performance on very large journals.
-- Add a `customer-merge` helper and documentation for managing customer canonicalization (see below).
-
-Happy to proceed with any of the above — tell me which option you prefer.
 
 ## customer-merge: non-destructive customer normalization
 
@@ -331,10 +318,3 @@ Examples
   # originals moved to .bak, anchors to .hash.bak if present
   tt audit verify
   ```
-
-If you'd like, I can:
-- Add an interactive confirmation prompt before apply,
-- Add a `--backup-dir` option so all backups/repairs are gathered in one place,
-- Add unit tests and CI checks for the repair/migration behavior.
-
-Tell me which of the above you prefer and I’ll implement it.
