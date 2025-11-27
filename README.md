@@ -98,6 +98,7 @@ sleep 2
   tt ticket tui    # interactive editor with inline save/delete
   tt ticket rm Acme Website
   ```
+- `tt ticket list --missing` surfaces projects seen in journals that do not yet have a ticket. The TUI also lets you toggle a missing-only view and shows recent projects when filling the form.
 - When present, ticket numbers are appended to report labels and prefixed to ICS event titles.
 
 ## Budgets & alerts

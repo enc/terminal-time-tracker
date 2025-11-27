@@ -40,16 +40,20 @@ const (
 
 type ticketTUIModel struct {
 	items    []ticketEntry
+	store    ticketStore
 	selected int
 	mode     ticketTUIMode
 	inputs   []textinput.Model
 	focus    int
 	status   string
 	err      string
+	observed []observedProject
+	missing  bool
 }
 
 func newTicketTUIModel() ticketTUIModel {
-	items := ticketStoreToEntries(loadTicketsFn())
+	store := loadTicketsFn()
+	items := ticketStoreToEntries(store)
 	inputs := make([]textinput.Model, 3)
 	labels := []string{"Customer", "Project", "Ticket"}
 	for i := range inputs {
@@ -62,10 +66,12 @@ func newTicketTUIModel() ticketTUIModel {
 		inputs[i] = ti
 	}
 	return ticketTUIModel{
-		items:  items,
-		mode:   modeList,
-		inputs: inputs,
-		status: "n: new  e/enter: edit  del: delete  q: quit  ctrl+s: save (in form)",
+		items:    items,
+		store:    store,
+		mode:     modeList,
+		inputs:   inputs,
+		status:   "n: new  e/enter: edit  del: delete  f: filter missing  q: quit  ctrl+s: save (in form)",
+		observed: observedProjectsFn(),
 	}
 }
 
@@ -144,11 +150,23 @@ func (m ticketTUIModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.err = err.Error()
 			return m, nil
 		}
-		m.items = ticketStoreToEntries(loadTicketsFn())
+		m.store = loadTicketsFn()
+		m.items = ticketStoreToEntries(m.store)
 		if m.selected >= len(m.items) && m.selected > 0 {
 			m.selected--
 		}
 		m.status = fmt.Sprintf("Removed %s / %s", item.Customer, item.Project)
+	case "f":
+		m.missing = !m.missing
+		m.items = m.computeListItems()
+		if m.selected >= len(m.items) && m.selected > 0 {
+			m.selected = len(m.items) - 1
+		}
+		if m.missing {
+			m.status = "Showing only projects without tickets (toggle with f)"
+		} else {
+			m.status = "Showing all tickets (toggle missing with f)"
+		}
 	}
 	return m, nil
 }
@@ -173,7 +191,8 @@ func (m ticketTUIModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.err = err.Error()
 			return m, nil
 		}
-		m.items = ticketStoreToEntries(loadTicketsFn())
+		m.store = loadTicketsFn()
+		m.items = m.computeListItems()
 		m.mode = modeList
 		m.err = ""
 		m.status = fmt.Sprintf("Saved %s / %s [%s]", cust, proj, tick)
@@ -231,20 +250,24 @@ func (m ticketTUIModel) View() string {
 }
 
 func (m ticketTUIModel) renderList() string {
-	if len(m.items) == 0 {
+	items := m.computeListItems()
+	if len(items) == 0 {
+		if m.missing {
+			return "No missing tickets found.\n"
+		}
 		return "No tickets.\nPress n to create one.\n"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%-20s %-20s %-12s\n", "Customer", "Project", "Ticket")
 	fmt.Fprintf(&b, "%s\n", strings.Repeat("-", 56))
-	for i, it := range m.items {
+	for i, it := range items {
 		prefix := " "
 		if i == m.selected {
 			prefix = ">"
 		}
 		fmt.Fprintf(&b, "%s %-19s %-20s %-12s\n", prefix, it.Customer, it.Project, it.Ticket)
 	}
-	b.WriteString("\nKeys: n new | e/enter edit | del delete | q quit\n")
+	b.WriteString("\nKeys: n new | e/enter edit | del delete | f filter missing | q quit\n")
 	return b.String()
 }
 
@@ -259,6 +282,17 @@ func (m ticketTUIModel) renderForm() string {
 			cursor = ">"
 		}
 		fmt.Fprintf(&b, "%s %s: %s\n", cursor, label, in.View())
+	}
+	if len(m.observed) > 0 {
+		b.WriteString("\nRecent projects:\n")
+		limit := 5
+		if len(m.observed) < limit {
+			limit = len(m.observed)
+		}
+		for i := 0; i < limit; i++ {
+			op := m.observed[i]
+			fmt.Fprintf(&b, "  - %s / %s\n", op.Customer, op.Project)
+		}
 	}
 	return b.String()
 }
@@ -277,4 +311,11 @@ func ticketStoreToEntries(store ticketStore) []ticketEntry {
 		return entries[i].Project < entries[j].Project
 	})
 	return entries
+}
+
+func (m ticketTUIModel) computeListItems() []ticketEntry {
+	if m.missing {
+		return missingTicketEntries(m.observed, m.store)
+	}
+	return ticketStoreToEntries(m.store)
 }

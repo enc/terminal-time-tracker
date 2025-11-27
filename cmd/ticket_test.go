@@ -37,6 +37,16 @@ func TestTicketSetGetDelete(t *testing.T) {
 }
 
 func TestTicketListCommand(t *testing.T) {
+	origObserved := observedProjectsFn
+	defer func() { observedProjectsFn = origObserved }()
+	observedProjectsFn = func() []observedProject {
+		return []observedProject{
+			{Customer: "Acme", Project: "Web"},
+			{Customer: "Beta", Project: "App"},
+			{Customer: "Gamma", Project: "API"},
+		}
+	}
+
 	tmp := t.TempDir()
 	oldHome := os.Getenv("HOME")
 	_ = os.Setenv("HOME", tmp)
@@ -57,6 +67,7 @@ func TestTicketListCommand(t *testing.T) {
 	ticketListCmd.SetOut(buf)
 	ticketListCmd.SetErr(buf)
 	ticketListCustomer = ""
+	ticketListMissing = false
 	if ticketListCmd.RunE != nil {
 		if err := ticketListCmd.RunE(ticketListCmd, nil); err != nil {
 			t.Fatalf("ticket list failed: %v", err)
@@ -73,5 +84,16 @@ func TestTicketListCommand(t *testing.T) {
 	}
 	if !strings.Contains(out, "Beta") || !strings.Contains(out, "App") || !strings.Contains(out, "XYZ-2") {
 		t.Fatalf("unexpected list output: %s", out)
+	}
+
+	// missing flag should surface observed projects lacking tickets
+	ticketListMissing = true
+	buf.Reset()
+	if ticketListCmd.RunE != nil {
+		if err := ticketListCmd.RunE(ticketListCmd, nil); err != nil {
+			t.Fatalf("ticket list (missing) failed: %v", err)
+		}
+	} else {
+		ticketListCmd.Run(ticketListCmd, nil)
 	}
 }

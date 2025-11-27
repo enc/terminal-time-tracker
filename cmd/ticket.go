@@ -6,24 +6,32 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type ticketStore map[string]map[string]string
+type observedProject struct {
+	Customer string
+	Project  string
+	LastSeen time.Time
+}
 
 var ticketsCache ticketStore
 
 // function hooks for testability
 var (
-	setTicketFn    = setTicket
-	deleteTicketFn = deleteTicket
-	loadTicketsFn  = loadTickets
+	setTicketFn        = setTicket
+	deleteTicketFn     = deleteTicket
+	loadTicketsFn      = loadTickets
+	observedProjectsFn = loadObservedProjects
 )
 
 var (
 	ticketListCustomer string
+	ticketListMissing  bool
 )
 
 var ticketCmd = &cobra.Command{
@@ -37,34 +45,55 @@ var ticketListCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		out := cmd.OutOrStdout()
 		ts := loadTickets()
-		if len(ts) == 0 {
-			fmt.Fprintln(out, "no tickets configured")
-			return
-		}
+		observed := observedProjectsFn()
+		showMissing := ticketListMissing
+
 		var pairs []struct {
 			customer string
 			project  string
 			ticket   string
 		}
-		for cust, pm := range ts {
-			if ticketListCustomer != "" && !strings.EqualFold(ticketListCustomer, cust) {
-				continue
-			}
-			for proj, t := range pm {
+		if showMissing {
+			missing := missingTicketEntries(observed, ts)
+			for _, m := range missing {
+				if ticketListCustomer != "" && !strings.EqualFold(ticketListCustomer, m.Customer) {
+					continue
+				}
 				pairs = append(pairs, struct {
 					customer string
 					project  string
 					ticket   string
-				}{cust, proj, t})
+				}{m.Customer, m.Project, ""})
+			}
+		} else {
+			for cust, pm := range ts {
+				if ticketListCustomer != "" && !strings.EqualFold(ticketListCustomer, cust) {
+					continue
+				}
+				for proj, t := range pm {
+					pairs = append(pairs, struct {
+						customer string
+						project  string
+						ticket   string
+					}{cust, proj, t})
+				}
 			}
 		}
 		if len(pairs) == 0 {
-			fmt.Fprintln(out, "no tickets configured")
+			if showMissing {
+				fmt.Fprintln(out, "no missing tickets found")
+			} else {
+				fmt.Fprintln(out, "no tickets configured")
+			}
 			return
 		}
 
 		tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "Customer\tProject\tTicket")
+		if showMissing {
+			fmt.Fprintln(tw, "Customer\tProject\tTicket?")
+		} else {
+			fmt.Fprintln(tw, "Customer\tProject\tTicket")
+		}
 		sort.Slice(pairs, func(i, j int) bool {
 			if pairs[i].customer != pairs[j].customer {
 				return pairs[i].customer < pairs[j].customer
@@ -109,9 +138,10 @@ var ticketRmCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(ticketCmd)
-	ticketCmd.AddCommand(ticketListCmd, ticketSetCmd, ticketRmCmd)
+	ticketCmd.AddCommand(ticketListCmd, ticketSetCmd, ticketRmCmd, ticketTUICmd)
 
 	ticketListCmd.Flags().StringVar(&ticketListCustomer, "customer", "", "filter by customer (case-insensitive)")
+	ticketListCmd.Flags().BoolVar(&ticketListMissing, "missing", false, "show only projects seen in journals that have no ticket yet")
 }
 
 func loadTickets() ticketStore {
@@ -222,4 +252,72 @@ func deleteTicket(customer, project string) error {
 	ticketsCache = cloneTickets(store)
 	viper.Set("tickets", store)
 	return saveViperConfig()
+}
+
+func loadObservedProjects() []observedProject {
+	idx, err := BuildCompletionIndex("")
+	if err != nil || idx == nil {
+		return nil
+	}
+	var res []observedProject
+	for canonicalCust, grp := range idx.Customers {
+		displayCust := canonicalCust
+		// pick most frequent raw name for display
+		var bestName string
+		var bestCount int
+		for _, ns := range grp.Names {
+			if ns.Count > bestCount {
+				bestCount = ns.Count
+				bestName = ns.Raw
+			}
+		}
+		if bestName != "" {
+			displayCust = bestName
+		}
+		projs := idx.Projects[canonicalCust]
+		for _, ps := range projs {
+			res = append(res, observedProject{
+				Customer: displayCust,
+				Project:  ps.Name,
+				LastSeen: ps.LastSeen,
+			})
+		}
+	}
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].LastSeen.After(res[j].LastSeen)
+	})
+	return res
+}
+
+func missingTicketEntries(observed []observedProject, store ticketStore) []ticketEntry {
+	var out []ticketEntry
+	for _, op := range observed {
+		if hasTicketInStore(store, op.Customer, op.Project) {
+			continue
+		}
+		out = append(out, ticketEntry{Customer: op.Customer, Project: op.Project})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Customer != out[j].Customer {
+			return out[i].Customer < out[j].Customer
+		}
+		return out[i].Project < out[j].Project
+	})
+	return out
+}
+
+func hasTicketInStore(store ticketStore, customer, project string) bool {
+	custNorm := strings.ToLower(strings.TrimSpace(customer))
+	projNorm := strings.ToLower(strings.TrimSpace(project))
+	for cust, pm := range store {
+		if strings.ToLower(strings.TrimSpace(cust)) != custNorm {
+			continue
+		}
+		for proj := range pm {
+			if strings.ToLower(strings.TrimSpace(proj)) == projNorm {
+				return true
+			}
+		}
+	}
+	return false
 }

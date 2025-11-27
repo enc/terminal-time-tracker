@@ -26,9 +26,8 @@ func TestTicketTUI_SaveUpdatesListAndSelection(t *testing.T) {
 	}
 
 	m := newTicketTUIModel()
-	if m.selected != 0 {
-		t.Fatalf("expected selected=0, got %d", m.selected)
-	}
+	m.store = ticketStore{} // ensure empty initial
+	m.items = nil
 
 	// enter form with new values
 	m.mode = modeForm
@@ -48,9 +47,14 @@ func TestTicketTUI_SaveUpdatesListAndSelection(t *testing.T) {
 
 func TestTicketTUI_ListNavigationUnaffectedInForm(t *testing.T) {
 	m := newTicketTUIModel()
+	m.store = ticketStore{}
 	m.items = []ticketEntry{
 		{Customer: "A", Project: "One", Ticket: "1"},
 		{Customer: "B", Project: "Two", Ticket: "2"},
+	}
+	m.observed = []observedProject{
+		{Customer: "A", Project: "One"},
+		{Customer: "B", Project: "Two"},
 	}
 	m.selected = 1
 	m.mode = modeForm

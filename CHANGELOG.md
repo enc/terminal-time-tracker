@@ -18,6 +18,12 @@
 - `tt ticket tui` Bubble Tea interface to add/edit/remove ticket numbers with keyboard-driven navigation.
 - Ticket list output now uses a readable table layout.
 
+## 0.4.5 - 2025-11-27
+
+### Added
+- `tt ticket list --missing` to show journal-observed projects lacking a ticket.
+- Ticket TUI shows recent projects when adding a ticket and supports a missing-only filter toggle.
+
 ## 0.4.1 - 2025-11-27
 
 ### Changed
