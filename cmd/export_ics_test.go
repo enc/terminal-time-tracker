@@ -50,8 +50,11 @@ func TestBuildICSEvents_SplitsAndRoundsAcrossDays(t *testing.T) {
 	if got := second[0].End.Sub(second[0].Start); got != 15*time.Minute {
 		t.Fatalf("second segment duration unexpected: %v", got)
 	}
-	if !strings.Contains(second[0].Description, "late work") {
-		t.Fatalf("description missing note: %s", second[0].Description)
+	if second[0].Summary != "late work" {
+		t.Fatalf("summary should be the note, got: %s", second[0].Summary)
+	}
+	if second[0].Description != "late work" {
+		t.Fatalf("description should be the note, got: %s", second[0].Description)
 	}
 }
 
@@ -123,11 +126,14 @@ func TestRunExportICS_WritesPerDayFilesWithNotesAndRounding(t *testing.T) {
 
 	content1, _ := os.ReadFile(path1)
 	text1 := unfoldICS(string(content1))
-	if !strings.Contains(text1, "SUMMARY:Acme / Site / dev") {
-		t.Fatalf("SUMMARY missing in day1: %s", text1)
+	if !strings.Contains(text1, "SUMMARY:morning") {
+		t.Fatalf("SUMMARY should be notes only in day1: %s", text1)
 	}
-	if !strings.Contains(text1, "Notes: morning") {
-		t.Fatalf("notes missing in description day1: %s", text1)
+	if strings.Contains(text1, "Customer:") || strings.Contains(text1, "Project:") {
+		t.Fatalf("description should not include metadata: %s", text1)
+	}
+	if !strings.Contains(text1, "DESCRIPTION:morning") {
+		t.Fatalf("DESCRIPTION should be notes only in day1: %s", text1)
 	}
 	if !strings.Contains(text1, "DTEND;TZID=UTC:20250301T091500") {
 		t.Fatalf("expected rounded end time in day1, got: %s", text1)
@@ -135,11 +141,14 @@ func TestRunExportICS_WritesPerDayFilesWithNotesAndRounding(t *testing.T) {
 
 	content2, _ := os.ReadFile(path2)
 	text2 := unfoldICS(string(content2))
-	if !strings.Contains(text2, "SUMMARY:Beta / App / call") {
-		t.Fatalf("SUMMARY missing in day2: %s", text2)
+	if !strings.Contains(text2, "SUMMARY:sync-up") {
+		t.Fatalf("SUMMARY should be notes only in day2: %s", text2)
 	}
 	if !strings.Contains(text2, "DTSTART;TZID=UTC:20250302T100000") || !strings.Contains(text2, "DTEND;TZID=UTC:20250302T103000") {
 		t.Fatalf("start/end mismatch in day2: %s", text2)
+	}
+	if !strings.Contains(text2, "DESCRIPTION:sync-up") {
+		t.Fatalf("DESCRIPTION should be notes only in day2: %s", text2)
 	}
 }
 
