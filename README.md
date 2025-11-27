@@ -13,6 +13,7 @@ A minimal, ready-to-run Go skeleton implementing the core commands:
 - `tt audit verify`
 - `tt completion` (generate shell completion; see below)
 - `tt budget set/ls/show/edit/rm` (configure time budgets and alerts; see Budgets section)
+- `tt ticket set/list/rm` (associate ticket numbers like ABC-123 with a customer/project)
 
 The `--at` flag (available on `start` and `switch`) accepts both absolute timestamps and a variety of convenient relative expressions. Supported forms include:
 - RFC3339 / absolute datetimes (e.g. `2025-10-20T08:00:00Z`, `2025-10-20 08:00`)
@@ -73,6 +74,7 @@ sleep 2
 ./tt budget set --customer acme --project mobilize:foundation --hours 40 --enforce warn
 ./tt report --week --with-budget
 ./tt export ics --week --out ./cal
+./tt ticket set Acme Website ABC-123
 ```
 
 ## Calendar export (ICS)
@@ -83,8 +85,18 @@ sleep 2
   tt export ics --range 2025-02-01..2025-02-15 --out ~/cal
   ```
 - Each day is written as `YYYY-MM-DD.ics` using your configured timezone and rounding settings.
-- Customer, project, activity, billable flag, notes, and rounded duration are embedded in the event summary/description.
+- Customer, project, activity, billable flag, notes, and rounded duration are embedded in the event summary/description. If a ticket is configured for a customer/project, it is included in the event title before the notes.
 - Entries spanning midnight are split per day while preserving the rounded total duration by proportionally allocating rounded time across the split segments.
+
+## Tickets
+
+- Assign ticket numbers to customer/project combinations for easier traceability in reports and calendar exports:
+  ```bash
+  tt ticket set Acme Website ABC-123
+  tt ticket list
+  tt ticket rm Acme Website
+  ```
+- When present, ticket numbers are appended to report labels and prefixed to ICS event titles.
 
 ## Budgets & alerts
 

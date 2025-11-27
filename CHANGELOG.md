@@ -1,6 +1,11 @@
 # Changelog
 
-# Changelog
+## 0.4.2 - 2025-11-27
+
+### Added
+- Ticket management via `tt ticket set/list/rm` to associate IDs (e.g., ABC-123) with customer/project pairs.
+- Ticket numbers appear in report labels and prefix ICS event titles alongside notes.
+- Case-insensitive ticket lookups for friendlier matching.
 
 ## 0.4.1 - 2025-11-27
 

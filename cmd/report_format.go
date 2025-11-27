@@ -39,14 +39,8 @@ func formatGroups(agg map[aggKey]*aggVal, groupEntries map[aggKey][]Entry, detai
 	for _, k := range keys {
 		v := agg[k]
 
-		// Build display name
-		name := k.Customer
-		if k.Project != "" {
-			name = fmt.Sprintf("%s / %s", k.Customer, k.Project)
-		}
-		if name == "" {
-			name = "(unknown)"
-		}
+		// Build display name including ticket (if configured)
+		name := labelWithTicket(k.Customer, k.Project)
 		if len(name) > labelW-2 {
 			name = name[:labelW-5] + "..."
 		}
@@ -101,4 +95,18 @@ func formatGroups(agg map[aggKey]*aggVal, groupEntries map[aggKey][]Entry, detai
 	}
 
 	return b.String()
+}
+
+func labelWithTicket(customer, project string) string {
+	name := customer
+	if project != "" {
+		name = fmt.Sprintf("%s / %s", customer, project)
+	}
+	if name == "" {
+		name = "(unknown)"
+	}
+	if t, ok := getTicket(customer, project); ok && strings.TrimSpace(t) != "" {
+		name = fmt.Sprintf("%s [%s]", name, t)
+	}
+	return name
 }

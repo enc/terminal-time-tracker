@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/viper"
 )
 
 // helper to strip ANSI escape sequences for predictable assertions
@@ -24,6 +26,13 @@ func containsAll(s string, subs ...string) bool {
 }
 
 func TestFormatGroups_TableDriven(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("tickets", map[string]any{
+		"ACME": map[string]any{"WebApp": "PROJ-7"},
+	})
+	ticketsCache = nil
+
 	// common timestamps
 	loc := time.UTC
 	start1 := time.Date(2025, 10, 6, 8, 30, 0, 0, loc)
@@ -59,6 +68,27 @@ func TestFormatGroups_TableDriven(t *testing.T) {
 			},
 			detailed:   false,
 			expecteds:  []string{"ACME / WebApp", "3.50h", "Raw=3h30m", "API scaffolding"},
+			unexpected: []string{},
+		},
+		{
+			name: "label includes ticket when configured",
+			agg: map[aggKey]*aggVal{
+				{Customer: "ACME", Project: "WebApp"}: {RawMin: 60, RoundedMin: 60},
+			},
+			groupEntries: map[aggKey][]Entry{
+				{Customer: "ACME", Project: "WebApp"}: {
+					{
+						ID:       "e-ticket",
+						Start:    start1,
+						End:      &end2,
+						Customer: "ACME",
+						Project:  "WebApp",
+						Notes:    []string{"Ticket work"},
+					},
+				},
+			},
+			detailed:   false,
+			expecteds:  []string{"ACME / WebApp [PROJ-7]", "1.00h"},
 			unexpected: []string{},
 		},
 		{

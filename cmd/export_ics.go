@@ -201,14 +201,20 @@ func buildIcsSummary(e Entry) string {
 }
 
 func buildIcsContent(e Entry) string {
+	var parts []string
+	if t, ok := getTicket(e.Customer, e.Project); ok && strings.TrimSpace(t) != "" {
+		parts = append(parts, t)
+	}
 	if len(e.Notes) > 0 {
-		return strings.Join(e.Notes, " | ")
+		parts = append(parts, strings.Join(e.Notes, " | "))
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, " | ")
 	}
 	customer := strings.TrimSpace(e.Customer)
 	if customer == "" {
 		customer = "(no customer)"
 	}
-	var parts []string
 	parts = append(parts, customer)
 	if p := strings.TrimSpace(e.Project); p != "" {
 		parts = append(parts, p)
