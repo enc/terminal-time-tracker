@@ -64,16 +64,16 @@ var ticketUIStyles = struct {
 	editInput   lipgloss.Style
 	filter      lipgloss.Style
 }{
-	header:      lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7D56F4")),
-	subtle:      lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")),
-	status:      lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")),
-	err:         lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true),
-	tableHeader: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F59E0B")),
-	row:         lipgloss.NewStyle(),
-	rowSelected: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#111827")).Background(lipgloss.Color("#A5B4FC")),
-	editLabel:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F59E0B")),
-	editInput:   lipgloss.NewStyle().Foreground(lipgloss.Color("#111827")),
-	filter:      lipgloss.NewStyle().Foreground(lipgloss.Color("#3B82F6")).Bold(true),
+	header:      lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#8B5CF6")).Background(lipgloss.Color("#111827")).Padding(0, 1),
+	subtle:      lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")),
+	status:      lipgloss.NewStyle().Foreground(lipgloss.Color("#34D399")),
+	err:         lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Bold(true),
+	tableHeader: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#C084FC")),
+	row:         lipgloss.NewStyle().Padding(0, 1),
+	rowSelected: lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("#E5E7EB")).Background(lipgloss.Color("#312E81")),
+	editLabel:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#C084FC")),
+	editInput:   lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")).Background(lipgloss.Color("#1F2937")).Padding(0, 1),
+	filter:      lipgloss.NewStyle().Foreground(lipgloss.Color("#60A5FA")).Bold(true),
 }
 
 func newTicketUI() ticketUIModel {
@@ -197,18 +197,15 @@ func (m ticketUIModel) View() string {
 		return b.String()
 	}
 
-	b.WriteString(ticketUIStyles.tableHeader.Render(fmt.Sprintf("%-18s %-18s %-10s\n", "Customer", "Project", "Ticket")))
+	b.WriteString(ticketUIStyles.tableHeader.Render(fmt.Sprintf("  %-18s %-18s %-10s\n", "Customer", "Project", "Ticket")))
 
 	for i, e := range m.entries {
-		prefix := " "
-		if i == m.selected {
-			prefix = ">"
-		}
+		prefix := "  "
 		ticket := e.Ticket
 		if ticket == "" {
 			ticket = "(none)"
 		}
-		line := fmt.Sprintf("%s %-18s %-18s [%s]\n", prefix, e.Customer, e.Project, ticket)
+		line := fmt.Sprintf("%s%-18s %-18s [%s]\n", prefix, e.Customer, e.Project, ticket)
 		if i == m.selected {
 			b.WriteString(ticketUIStyles.rowSelected.Render(line))
 		} else {
