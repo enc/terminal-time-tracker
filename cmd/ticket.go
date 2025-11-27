@@ -18,6 +18,11 @@ type observedProject struct {
 	Project  string
 	LastSeen time.Time
 }
+type ticketEntry struct {
+	Customer string
+	Project  string
+	Ticket   string
+}
 
 var ticketsCache ticketStore
 
@@ -138,7 +143,7 @@ var ticketRmCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(ticketCmd)
-	ticketCmd.AddCommand(ticketListCmd, ticketSetCmd, ticketRmCmd, ticketTUICmd)
+	ticketCmd.AddCommand(ticketListCmd, ticketSetCmd, ticketRmCmd)
 
 	ticketListCmd.Flags().StringVar(&ticketListCustomer, "customer", "", "filter by customer (case-insensitive)")
 	ticketListCmd.Flags().BoolVar(&ticketListMissing, "missing", false, "show only projects seen in journals that have no ticket yet")

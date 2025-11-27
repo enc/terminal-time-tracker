@@ -24,10 +24,10 @@
 - `tt ticket list --missing` to show journal-observed projects lacking a ticket.
 - Ticket TUI shows recent projects when adding a ticket and supports a missing-only filter toggle.
 
-## 0.4.6 - 2025-11-27
+## 0.4.7 - 2025-11-27
 
 ### Changed
-- Ticket TUI add flow now selects from recent/missing projects instead of free text; ticket entry remains typed. Keyboard focus keeps list navigation separate from ticket input.
+- Removed the ticket TUI (will be redesigned); CLI ticket commands remain.
 
 ## 0.4.1 - 2025-11-27
 
