@@ -43,35 +43,33 @@ type ticketTUIModel struct {
 	store    ticketStore
 	selected int
 	mode     ticketTUIMode
-	inputs   []textinput.Model
-	focus    int
+	formTicket textinput.Model
+	selectionFocus bool // true when selection list (new) is focused
 	status   string
 	err      string
 	observed []observedProject
 	missing  bool
+	formIsNew bool
+	formTarget ticketEntry
+	missingList []ticketEntry
+	selectionIdx int
 }
 
 func newTicketTUIModel() ticketTUIModel {
 	store := loadTicketsFn()
 	items := ticketStoreToEntries(store)
-	inputs := make([]textinput.Model, 3)
-	labels := []string{"Customer", "Project", "Ticket"}
-	for i := range inputs {
-		ti := textinput.New()
-		ti.Placeholder = labels[i]
-		ti.CharLimit = 64
-		if i == 0 {
-			ti.Focus()
-		}
-		inputs[i] = ti
-	}
+	ti := textinput.New()
+	ti.Placeholder = "Ticket"
+	ti.CharLimit = 64
+	ti.Blur()
 	return ticketTUIModel{
-		items:    items,
-		store:    store,
-		mode:     modeList,
-		inputs:   inputs,
-		status:   "n: new  e/enter: edit  del: delete  f: filter missing  q: quit  ctrl+s: save (in form)",
-		observed: observedProjectsFn(),
+		items:         items,
+		store:         store,
+		mode:          modeList,
+		formTicket:    ti,
+		status:        "n: new  e/enter: edit  del: delete  f: filter missing  q: quit  ctrl+s: save (in form)",
+		observed:      observedProjectsFn(),
+		selectionFocus: true,
 	}
 }
 
@@ -113,34 +111,31 @@ func (m ticketTUIModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "n":
 		m.mode = modeForm
-		m.focus = 0
+		m.formIsNew = true
 		m.err = ""
-		for i := range m.inputs {
-			m.inputs[i].SetValue("")
-			if i == 0 {
-				m.inputs[i].Focus()
-			} else {
-				m.inputs[i].Blur()
-			}
+		m.selectionFocus = true
+		m.formTicket.SetValue("")
+		m.formTicket.Blur()
+		m.missingList = missingTicketEntries(m.observed, m.store)
+		m.selectionIdx = 0
+		if len(m.missingList) == 0 {
+			m.err = "no recent projects without tickets"
+			m.mode = modeList
+			return m, nil
 		}
 	case "enter", "e":
 		if len(m.items) == 0 {
 			return m, nil
 		}
 		m.mode = modeForm
-		m.focus = 0
+		m.formIsNew = false
 		m.err = ""
-		// populate inputs
 		cur := m.items[m.selected]
-		values := []string{cur.Customer, cur.Project, cur.Ticket}
-		for i := range m.inputs {
-			m.inputs[i].SetValue(values[i])
-			if i == 0 {
-				m.inputs[i].Focus()
-			} else {
-				m.inputs[i].Blur()
-			}
-		}
+		m.formTarget = cur
+		m.formTicket.SetValue(cur.Ticket)
+		m.formTicket.Focus()
+		m.selectionFocus = false
+		m.missingList = nil
 	case "delete":
 		if len(m.items) == 0 {
 			return m, nil
@@ -180,14 +175,20 @@ func (m ticketTUIModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.err = ""
 		return m, nil
 	case tea.KeyCtrlS:
-		cust := strings.TrimSpace(m.inputs[0].Value())
-		proj := strings.TrimSpace(m.inputs[1].Value())
-		tick := strings.TrimSpace(m.inputs[2].Value())
-		if cust == "" || proj == "" || tick == "" {
-			m.err = "customer, project, and ticket are required"
+		tick := strings.TrimSpace(m.formTicket.Value())
+		if tick == "" {
+			m.err = "ticket is required"
 			return m, nil
 		}
-		if err := setTicketFn(cust, proj, tick); err != nil {
+		target := m.formTarget
+		if m.formIsNew {
+			if len(m.missingList) == 0 {
+				m.err = "no target selected"
+				return m, nil
+			}
+			target = m.missingList[m.selectionIdx]
+		}
+		if err := setTicketFn(target.Customer, target.Project, tick); err != nil {
 			m.err = err.Error()
 			return m, nil
 		}
@@ -195,40 +196,48 @@ func (m ticketTUIModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.items = m.computeListItems()
 		m.mode = modeList
 		m.err = ""
-		m.status = fmt.Sprintf("Saved %s / %s [%s]", cust, proj, tick)
+		m.status = fmt.Sprintf("Saved %s / %s [%s]", target.Customer, target.Project, tick)
 		// focus selection to saved item
 		for i, it := range m.items {
-			if strings.EqualFold(it.Customer, cust) && strings.EqualFold(it.Project, proj) {
+			if strings.EqualFold(it.Customer, target.Customer) && strings.EqualFold(it.Project, target.Project) {
 				m.selected = i
 				break
 			}
 		}
 		return m, nil
 	case tea.KeyTab, tea.KeyShiftTab:
-		m.inputs[m.focus].Blur()
-		if msg.Type == tea.KeyTab {
-			m.focus = (m.focus + 1) % len(m.inputs)
+		if m.formIsNew {
+			m.selectionFocus = !m.selectionFocus
+			if m.selectionFocus {
+				m.formTicket.Blur()
+			} else {
+				m.formTicket.Focus()
+			}
 		} else {
-			m.focus = (m.focus - 1 + len(m.inputs)) % len(m.inputs)
+			m.selectionFocus = false
+			m.formTicket.Focus()
 		}
-		m.inputs[m.focus].Focus()
 		return m, nil
 	}
 
-	// Route remaining keys to focused input only (so navigation keys don't affect list).
-	cmd := m.updateFocusedInput(msg)
-	return m, cmd
-}
-
-func (m *ticketTUIModel) updateFocusedInput(msg tea.KeyMsg) tea.Cmd {
-	for i := range m.inputs {
-		if i == m.focus {
-			var cmd tea.Cmd
-			m.inputs[i], cmd = m.inputs[i].Update(msg)
-			return cmd
+	if m.formIsNew && m.selectionFocus {
+		switch msg.String() {
+		case "up", "k":
+			if m.selectionIdx > 0 {
+				m.selectionIdx--
+			}
+		case "down", "j":
+			if m.selectionIdx < len(m.missingList)-1 {
+				m.selectionIdx++
+			}
 		}
+		return m, nil
 	}
-	return nil
+
+	// Route remaining keys to ticket input only.
+	var cmd tea.Cmd
+	m.formTicket, cmd = m.formTicket.Update(msg)
+	return m, cmd
 }
 
 func (m ticketTUIModel) View() string {
@@ -250,8 +259,8 @@ func (m ticketTUIModel) View() string {
 }
 
 func (m ticketTUIModel) renderList() string {
-	items := m.computeListItems()
-	if len(items) == 0 {
+	m.items = m.computeListItems()
+	if len(m.items) == 0 {
 		if m.missing {
 			return "No missing tickets found.\n"
 		}
@@ -260,7 +269,7 @@ func (m ticketTUIModel) renderList() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%-20s %-20s %-12s\n", "Customer", "Project", "Ticket")
 	fmt.Fprintf(&b, "%s\n", strings.Repeat("-", 56))
-	for i, it := range items {
+	for i, it := range m.items {
 		prefix := " "
 		if i == m.selected {
 			prefix = ">"
@@ -273,27 +282,36 @@ func (m ticketTUIModel) renderList() string {
 
 func (m ticketTUIModel) renderForm() string {
 	var b strings.Builder
-	b.WriteString("Edit ticket (ctrl+s save, esc cancel, tab to move)\n\n")
-	labels := []string{"Customer", "Project", "Ticket"}
-	for i, in := range m.inputs {
-		label := labels[i]
-		cursor := " "
-		if i == m.focus {
-			cursor = ">"
-		}
-		fmt.Fprintf(&b, "%s %s: %s\n", cursor, label, in.View())
+	header := "Edit ticket (ctrl+s save, esc cancel, tab to switch focus)"
+	if m.formIsNew {
+		header = "New ticket (select project ↑/↓, tab to ticket, ctrl+s save, esc cancel)"
 	}
-	if len(m.observed) > 0 {
-		b.WriteString("\nRecent projects:\n")
-		limit := 5
-		if len(m.observed) < limit {
-			limit = len(m.observed)
+	b.WriteString(header + "\n\n")
+
+	if m.formIsNew {
+		b.WriteString("Projects without tickets:\n")
+		if len(m.missingList) == 0 {
+			b.WriteString("  (none)\n")
+		} else {
+			for i, op := range m.missingList {
+				cursor := " "
+				if m.selectionFocus && i == m.selectionIdx {
+					cursor = ">"
+				}
+				fmt.Fprintf(&b, "%s %s / %s\n", cursor, op.Customer, op.Project)
+			}
 		}
-		for i := 0; i < limit; i++ {
-			op := m.observed[i]
-			fmt.Fprintf(&b, "  - %s / %s\n", op.Customer, op.Project)
-		}
+	} else {
+		fmt.Fprintf(&b, "Customer / Project: %s / %s\n", m.formTarget.Customer, m.formTarget.Project)
 	}
+
+	b.WriteString("\nTicket: ")
+	if !m.selectionFocus || !m.formIsNew {
+		b.WriteString(m.formTicket.View())
+	} else {
+		b.WriteString("[tab to edit]")
+	}
+	b.WriteString("\n")
 	return b.String()
 }
 

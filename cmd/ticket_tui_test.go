@@ -9,9 +9,11 @@ import (
 func TestTicketTUI_SaveUpdatesListAndSelection(t *testing.T) {
 	origSet := setTicketFn
 	origLoad := loadTicketsFn
+	origObserved := observedProjectsFn
 	defer func() {
 		setTicketFn = origSet
 		loadTicketsFn = origLoad
+		observedProjectsFn = origObserved
 	}()
 
 	var saved []ticketEntry
@@ -24,20 +26,32 @@ func TestTicketTUI_SaveUpdatesListAndSelection(t *testing.T) {
 			"Acme": {"Web": "A-1"},
 		}
 	}
+	observedProjectsFn = func() []observedProject {
+		return []observedProject{
+			{Customer: "Acme", Project: "API"},
+		}
+	}
 
 	m := newTicketTUIModel()
-	m.store = ticketStore{} // ensure empty initial
-	m.items = nil
-
-	// enter form with new values
-	m.mode = modeForm
-	m.inputs[0].SetValue("Beta")
-	m.inputs[1].SetValue("App")
-	m.inputs[2].SetValue("B-2")
-
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	// trigger new flow
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 	model := m2.(ticketTUIModel)
-	if len(saved) != 1 || saved[0].Customer != "Beta" || saved[0].Project != "App" || saved[0].Ticket != "B-2" {
+	if model.mode != modeForm || !model.formIsNew {
+		t.Fatalf("expected form mode for new ticket")
+	}
+	if len(model.missingList) == 0 {
+		t.Fatalf("expected missing list to be populated")
+	}
+	model.formTicket.SetValue("B-2")
+	// move focus to ticket input if needed
+	if model.selectionFocus {
+		mnext, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+		model = mnext.(ticketTUIModel)
+	}
+
+	m3, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	model = m3.(ticketTUIModel)
+	if len(saved) != 1 || saved[0].Customer != "Acme" || saved[0].Project != "API" || saved[0].Ticket != "B-2" {
 		t.Fatalf("unexpected saved: %+v", saved)
 	}
 	if model.mode != modeList {
@@ -58,8 +72,10 @@ func TestTicketTUI_ListNavigationUnaffectedInForm(t *testing.T) {
 	}
 	m.selected = 1
 	m.mode = modeForm
-	m.focus = 0
-	m.inputs[0].SetValue("Editing")
+	m.formIsNew = false
+	m.formTarget = m.items[m.selected]
+	m.formTicket.SetValue("Editing")
+	m.selectionFocus = false
 
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	model := m2.(ticketTUIModel)
