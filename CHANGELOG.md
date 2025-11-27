@@ -2,6 +2,12 @@
 
 # Changelog
 
+## 0.4.1 - 2025-11-27
+
+### Changed
+- ICS export events now place notes directly into SUMMARY and DESCRIPTION for clearer calendar entries.
+- Bumped VERSION to 0.4.1.
+
 ## 0.4.0 - 2025-11-26
 
 ### Added
