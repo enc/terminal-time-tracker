@@ -29,6 +29,11 @@
 ### Changed
 - Removed the ticket TUI (will be redesigned); CLI ticket commands remain.
 
+## 0.4.8 - 2025-11-27
+
+### Added
+- Reintroduced `tt ticket tui` with a streamlined flow: list recent projects with tickets, filter missing/assigned/all, edit tickets inline with enter, and immediate writes to config.
+
 ## 0.4.1 - 2025-11-27
 
 ### Changed

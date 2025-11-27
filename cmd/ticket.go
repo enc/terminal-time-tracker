@@ -143,7 +143,7 @@ var ticketRmCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(ticketCmd)
-	ticketCmd.AddCommand(ticketListCmd, ticketSetCmd, ticketRmCmd)
+	ticketCmd.AddCommand(ticketListCmd, ticketSetCmd, ticketRmCmd, ticketTUICmd)
 
 	ticketListCmd.Flags().StringVar(&ticketListCustomer, "customer", "", "filter by customer (case-insensitive)")
 	ticketListCmd.Flags().BoolVar(&ticketListMissing, "missing", false, "show only projects seen in journals that have no ticket yet")
