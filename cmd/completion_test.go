@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
@@ -49,5 +50,39 @@ func TestAliasFlagCompletion_FilteringAndList(t *testing.T) {
 	cfg := filepath.Join(tmp, ".tt", "config.yaml")
 	if _, err := os.Stat(cfg); err != nil {
 		t.Fatalf("expected config file at %s, stat error: %v", cfg, err)
+	}
+}
+
+func TestTicketSetValidArgsUsesCustomerProjectCompletion(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("completion.allow.customers", []string{"Acme", "Beta"})
+	viper.Set("completion.allow.projects", map[string]any{
+		"Acme": []any{"Web", "API"},
+	})
+
+	res, dir := ticketSetValidArgs(nil, []string{}, "")
+	if dir != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("expected NoFileComp, got %v", dir)
+	}
+	if !reflect.DeepEqual(res, []string{"Acme", "Beta"}) {
+		t.Fatalf("unexpected customers: %v", res)
+	}
+
+	res2, dir2 := ticketSetValidArgs(nil, []string{"Acme"}, "")
+	if dir2 != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("expected NoFileComp, got %v", dir2)
+	}
+	if len(res2) != 2 || res2[0] != "API" || res2[1] != "Web" {
+		t.Fatalf("unexpected projects: %v", res2)
+	}
+
+	// third arg -> no completion
+	res3, dir3 := ticketSetValidArgs(nil, []string{"Acme", "Web"}, "")
+	if dir3 != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("expected NoFileComp, got %v", dir3)
+	}
+	if res3 != nil {
+		t.Fatalf("expected nil completions for ticket arg, got %v", res3)
 	}
 }

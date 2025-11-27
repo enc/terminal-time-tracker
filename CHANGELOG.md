@@ -7,6 +7,11 @@
 - Ticket numbers appear in report labels and prefix ICS event titles alongside notes.
 - Case-insensitive ticket lookups for friendlier matching.
 
+## 0.4.3 - 2025-11-27
+
+### Added
+- Shell completion for `tt ticket set` now suggests customers and projects.
+
 ## 0.4.1 - 2025-11-27
 
 ### Changed

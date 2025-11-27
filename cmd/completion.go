@@ -138,6 +138,7 @@ func init() {
 	startCmd.ValidArgsFunction = customerProjectValidArgs
 	switchCmd.ValidArgsFunction = customerProjectValidArgs
 	addCmd.ValidArgsFunction = addCmdValidArgs
+	ticketSetCmd.ValidArgsFunction = ticketSetValidArgs
 
 	// Register flag completion for --alias to suggest existing alias names.
 	// We ignore the returned error as registration should succeed in normal cobra usage;
@@ -202,6 +203,23 @@ func addCmdValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]st
 
 	if len(args) == 3 {
 		cust := canonicalForCompletion(strings.TrimSpace(args[2]))
+		projs := projectCompletionList(decisions, cust, "", toComplete)
+		return projs, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+// ticketSetValidArgs completes customer/project for `ticket set <customer> <project> <ticket>`.
+func ticketSetValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	decisions := loadCompletionDecisions()
+
+	if len(args) == 0 {
+		custs := customerCompletionList(decisions, "", toComplete)
+		return custs, cobra.ShellCompDirectiveNoFileComp
+	}
+	if len(args) == 1 {
+		cust := canonicalForCompletion(strings.TrimSpace(args[0]))
 		projs := projectCompletionList(decisions, cust, "", toComplete)
 		return projs, cobra.ShellCompDirectiveNoFileComp
 	}
