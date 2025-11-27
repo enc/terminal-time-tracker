@@ -14,6 +14,7 @@ A minimal, ready-to-run Go skeleton implementing the core commands:
 - `tt completion` (generate shell completion; see below)
 - `tt budget set/ls/show/edit/rm` (configure time budgets and alerts; see Budgets section)
 - `tt ticket set/list/rm` (associate ticket numbers like ABC-123 with a customer/project)
+- `tt ticket tui` (interactive ticket editor)
 
 The `--at` flag (available on `start` and `switch`) accepts both absolute timestamps and a variety of convenient relative expressions. Supported forms include:
 - RFC3339 / absolute datetimes (e.g. `2025-10-20T08:00:00Z`, `2025-10-20 08:00`)
@@ -94,6 +95,7 @@ sleep 2
   ```bash
   tt ticket set Acme Website ABC-123
   tt ticket list
+  tt ticket tui    # interactive editor with inline save/delete
   tt ticket rm Acme Website
   ```
 - When present, ticket numbers are appended to report labels and prefixed to ICS event titles.

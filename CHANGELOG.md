@@ -12,6 +12,12 @@
 ### Added
 - Shell completion for `tt ticket set` now suggests customers and projects.
 
+## 0.4.4 - 2025-11-27
+
+### Added
+- `tt ticket tui` Bubble Tea interface to add/edit/remove ticket numbers with keyboard-driven navigation.
+- Ticket list output now uses a readable table layout.
+
 ## 0.4.1 - 2025-11-27
 
 ### Changed

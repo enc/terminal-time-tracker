@@ -65,7 +65,13 @@ func TestTicketListCommand(t *testing.T) {
 		ticketListCmd.Run(ticketListCmd, nil)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "Acme / Web: ABC-1") || !strings.Contains(out, "Beta / App: XYZ-2") {
+	if !strings.Contains(out, "Customer") || !strings.Contains(out, "Project") || !strings.Contains(out, "Ticket") {
+		t.Fatalf("expected header in output, got: %s", out)
+	}
+	if !strings.Contains(out, "Acme") || !strings.Contains(out, "Web") || !strings.Contains(out, "ABC-1") {
+		t.Fatalf("unexpected list output: %s", out)
+	}
+	if !strings.Contains(out, "Beta") || !strings.Contains(out, "App") || !strings.Contains(out, "XYZ-2") {
 		t.Fatalf("unexpected list output: %s", out)
 	}
 }

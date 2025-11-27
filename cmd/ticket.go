@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -13,6 +14,13 @@ import (
 type ticketStore map[string]map[string]string
 
 var ticketsCache ticketStore
+
+// function hooks for testability
+var (
+	setTicketFn    = setTicket
+	deleteTicketFn = deleteTicket
+	loadTicketsFn  = loadTickets
+)
 
 var (
 	ticketListCustomer string
@@ -54,6 +62,9 @@ var ticketListCmd = &cobra.Command{
 			fmt.Fprintln(out, "no tickets configured")
 			return
 		}
+
+		tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "Customer\tProject\tTicket")
 		sort.Slice(pairs, func(i, j int) bool {
 			if pairs[i].customer != pairs[j].customer {
 				return pairs[i].customer < pairs[j].customer
@@ -61,8 +72,9 @@ var ticketListCmd = &cobra.Command{
 			return pairs[i].project < pairs[j].project
 		})
 		for _, p := range pairs {
-			fmt.Fprintf(out, "%s / %s: %s\n", p.customer, p.project, p.ticket)
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", p.customer, p.project, p.ticket)
 		}
+		_ = tw.Flush()
 	},
 }
 
