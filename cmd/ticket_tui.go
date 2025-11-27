@@ -2,13 +2,13 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
-	"sort"
-
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -50,6 +50,30 @@ type ticketRow struct {
 	Project  string
 	Ticket   string
 	LastSeen time.Time
+}
+
+var ticketUIStyles = struct {
+	header      lipgloss.Style
+	subtle      lipgloss.Style
+	status      lipgloss.Style
+	err         lipgloss.Style
+	tableHeader lipgloss.Style
+	row         lipgloss.Style
+	rowSelected lipgloss.Style
+	editLabel   lipgloss.Style
+	editInput   lipgloss.Style
+	filter      lipgloss.Style
+}{
+	header:      lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7D56F4")),
+	subtle:      lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")),
+	status:      lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")),
+	err:         lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true),
+	tableHeader: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F59E0B")),
+	row:         lipgloss.NewStyle(),
+	rowSelected: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#111827")).Background(lipgloss.Color("#A5B4FC")),
+	editLabel:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F59E0B")),
+	editInput:   lipgloss.NewStyle().Foreground(lipgloss.Color("#111827")),
+	filter:      lipgloss.NewStyle().Foreground(lipgloss.Color("#3B82F6")).Bold(true),
 }
 
 func newTicketUI() ticketUIModel {
@@ -162,16 +186,18 @@ func (m ticketUIModel) View() string {
 	if m.editing {
 		title = "Ticket Editor"
 	}
-	fmt.Fprintf(&b, "%s (%s)\n", title, m.filterLabel())
+	fmt.Fprintf(&b, "%s %s\n", ticketUIStyles.header.Render(title), ticketUIStyles.filter.Render("["+m.filterLabel()+"]"))
 	if m.errMsg != "" {
-		fmt.Fprintf(&b, "ERR: %s\n", m.errMsg)
+		fmt.Fprintf(&b, "%s\n", ticketUIStyles.err.Render("ERR: "+m.errMsg))
 	}
-	b.WriteString(m.status + "\n\n")
+	b.WriteString(ticketUIStyles.status.Render(m.status) + "\n\n")
 
 	if len(m.entries) == 0 {
-		b.WriteString("No projects found.\n")
+		b.WriteString(ticketUIStyles.subtle.Render("No projects found.") + "\n")
 		return b.String()
 	}
+
+	b.WriteString(ticketUIStyles.tableHeader.Render(fmt.Sprintf("%-18s %-18s %-10s\n", "Customer", "Project", "Ticket")))
 
 	for i, e := range m.entries {
 		prefix := " "
@@ -182,13 +208,18 @@ func (m ticketUIModel) View() string {
 		if ticket == "" {
 			ticket = "(none)"
 		}
-		fmt.Fprintf(&b, "%s %-18s %-18s [%s]\n", prefix, e.Customer, e.Project, ticket)
+		line := fmt.Sprintf("%s %-18s %-18s [%s]\n", prefix, e.Customer, e.Project, ticket)
+		if i == m.selected {
+			b.WriteString(ticketUIStyles.rowSelected.Render(line))
+		} else {
+			b.WriteString(ticketUIStyles.row.Render(line))
+		}
 	}
 
 	if m.editing {
 		cur := m.entries[m.editIdx]
-		b.WriteString("\nEditing: " + cur.Customer + " / " + cur.Project + "\n")
-		b.WriteString(m.editInput.View() + "\n")
+		b.WriteString("\n" + ticketUIStyles.editLabel.Render("Editing: ") + cur.Customer + " / " + cur.Project + "\n")
+		b.WriteString(ticketUIStyles.editInput.Render(m.editInput.View()) + "\n")
 	}
 	return b.String()
 }

@@ -34,6 +34,11 @@
 ### Added
 - Reintroduced `tt ticket tui` with a streamlined flow: list recent projects with tickets, filter missing/assigned/all, edit tickets inline with enter, and immediate writes to config.
 
+## 0.4.9 - 2025-11-27
+
+### Changed
+- Styled the ticket TUI with Lip Gloss: colored headers, table rows, status/error accents, and clearer edit hints.
+
 ## 0.4.1 - 2025-11-27
 
 ### Changed
