@@ -39,6 +39,11 @@
 ### Changed
 - Styled the ticket TUI with Lip Gloss: colored headers, table rows, status/error accents, and clearer edit hints.
 
+## 0.4.10 - 2025-11-27
+
+### Changed
+- ICS event summaries now use `<ticket?> <customer> / <project>` and descriptions carry notes only.
+
 ## 0.4.1 - 2025-11-27
 
 ### Changed

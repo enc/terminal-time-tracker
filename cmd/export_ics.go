@@ -138,11 +138,10 @@ func buildICSEvents(entries []Entry, loc *time.Location, rounding Rounding) (map
 			allocated += alloc
 
 			end := s.start.Add(time.Duration(alloc) * time.Second)
-			content := buildIcsContent(e)
 			ev := icsEvent{
 				UID:         fmt.Sprintf("%s-%s@tt", e.ID, s.start.UTC().Format("20060102T150405Z")),
-				Summary:     content,
-				Description: content,
+				Summary:     buildIcsSummary(e),
+				Description: buildIcsDescription(e),
 				Start:       s.start,
 				End:         end,
 			}
@@ -196,33 +195,27 @@ func splitEntryByDay(e Entry, loc *time.Location) []entrySegment {
 }
 
 func buildIcsSummary(e Entry) string {
-	// legacy helper retained for compatibility; now delegates to note-only content
-	return buildIcsContent(e)
-}
-
-func buildIcsContent(e Entry) string {
 	var parts []string
 	if t, ok := getTicket(e.Customer, e.Project); ok && strings.TrimSpace(t) != "" {
-		parts = append(parts, t)
-	}
-	if len(e.Notes) > 0 {
-		parts = append(parts, strings.Join(e.Notes, " | "))
-	}
-	if len(parts) > 0 {
-		return strings.Join(parts, " | ")
+		parts = append(parts, strings.TrimSpace(t))
 	}
 	customer := strings.TrimSpace(e.Customer)
 	if customer == "" {
 		customer = "(no customer)"
 	}
-	parts = append(parts, customer)
 	if p := strings.TrimSpace(e.Project); p != "" {
-		parts = append(parts, p)
+		parts = append(parts, fmt.Sprintf("%s / %s", customer, p))
+	} else {
+		parts = append(parts, customer)
 	}
-	if a := strings.TrimSpace(e.Activity); a != "" {
-		parts = append(parts, a)
+	return strings.Join(parts, " ")
+}
+
+func buildIcsDescription(e Entry) string {
+	if len(e.Notes) > 0 {
+		return strings.Join(e.Notes, " | ")
 	}
-	return strings.Join(parts, " / ")
+	return ""
 }
 
 func writeICSFile(path string, loc *time.Location, now time.Time, events []icsEvent) error {
