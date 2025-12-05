@@ -208,14 +208,27 @@ func buildIcsSummary(e Entry) string {
 	} else {
 		parts = append(parts, customer)
 	}
-	return strings.Join(parts, " ")
+	return strings.TrimSpace(strings.Join(parts, " "))
 }
 
 func buildIcsDescription(e Entry) string {
-	if len(e.Notes) > 0 {
-		return strings.Join(e.Notes, " | ")
+	if len(e.Notes) == 0 {
+		return ""
 	}
-	return ""
+	seen := map[string]struct{}{}
+	var cleaned []string
+	for _, n := range e.Notes {
+		trim := strings.TrimSpace(n)
+		if trim == "" {
+			continue
+		}
+		if _, ok := seen[trim]; ok {
+			continue
+		}
+		seen[trim] = struct{}{}
+		cleaned = append(cleaned, trim)
+	}
+	return strings.Join(cleaned, "\n")
 }
 
 func writeICSFile(path string, loc *time.Location, now time.Time, events []icsEvent) error {
