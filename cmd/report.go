@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -93,8 +92,9 @@ var reportCmd = &cobra.Command{
 
 		// Header / summary (colorized)
 		// Labels use `ansiHeading`, numeric/emphasized values use `ansiHours` for clear hierarchy.
+		loc := loadConfiguredLocation()
 		fmt.Printf("%sReport Range:%s %s → %s   TZ: %s\n",
-			ansiHeading, ansiReset, from.Format("2006-01-02"), to.Format("2006-01-02"), time.Now().Location())
+			ansiHeading, ansiReset, from.Format("2006-01-02"), to.Format("2006-01-02"), loc)
 		fmt.Printf("%sLoaded entries:%s %s%d%s   Considered (finished): %s%d%s   Rounding: strategy=%s quantum=%d minimum=%d\n\n",
 			ansiHeading, ansiReset,
 			ansiHours, len(entries), ansiReset,

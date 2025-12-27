@@ -1,11 +1,7 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -86,102 +82,27 @@ func findActiveAndLast(from, to time.Time) (*Entry, *Entry, error) {
 	from = time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
 	to = time.Date(to.Year(), to.Month(), to.Day(), 23, 59, 59, 0, to.Location())
 
-	var events []Event
-	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
-		p := journalPathFor(d)
-		b, err := os.ReadFile(p)
-		if err != nil {
-			// ignore missing files
+	entries, err := loadEntries(from, to)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var active *Entry
+	var lastClosed *Entry
+	for i := range entries {
+		e := entries[i]
+		if e.End == nil {
+			if active == nil || e.Start.After(active.Start) {
+				cpy := e
+				active = &cpy
+			}
 			continue
 		}
-		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			var ev Event
-			if err := json.Unmarshal([]byte(line), &ev); err == nil {
-				events = append(events, ev)
-			}
-		}
-	}
-	// sort events by timestamp
-	sort.Slice(events, func(i, j int) bool { return events[i].TS.Before(events[j].TS) })
-
-	var current *Entry
-	var lastClosed *Entry
-
-	for _, ev := range events {
-		switch ev.Type {
-		case "start":
-			// if there is already a running entry, auto-stop it at this start time
-			if current != nil {
-				// close previous
-				end := ev.TS
-				current.End = &end
-				// copy to lastClosed
-				cpy := *current
-				lastClosed = &cpy
-			}
-			billable := true
-			if ev.Billable != nil {
-				billable = *ev.Billable
-			}
-			current = &Entry{
-				ID:       ev.ID,
-				Start:    ev.TS,
-				End:      nil,
-				Customer: ev.Customer,
-				Project:  ev.Project,
-				Activity: ev.Activity,
-				Billable: billable,
-				Notes:    []string{},
-				Tags:     ev.Tags,
-			}
-			if ev.Note != "" {
-				current.Notes = append(current.Notes, ev.Note)
-			}
-		case "note":
-			if current != nil {
-				current.Notes = append(current.Notes, ev.Note)
-			}
-		case "stop":
-			if current != nil {
-				end := ev.TS
-				current.End = &end
-				cpy := *current
-				lastClosed = &cpy
-				current = nil
-			}
-		case "add":
-			// add is a closed entry; ev.Ref is "startISO..endISO"
-			parts := strings.Split(ev.Ref, "..")
-			if len(parts) == 2 {
-				st, err1 := time.Parse(time.RFC3339, parts[0])
-				en, err2 := time.Parse(time.RFC3339, parts[1])
-				if err1 == nil && err2 == nil {
-					billable := true
-					if ev.Billable != nil {
-						billable = *ev.Billable
-					}
-					e := Entry{
-						ID:       ev.ID,
-						Start:    st,
-						End:      &en,
-						Customer: ev.Customer,
-						Project:  ev.Project,
-						Activity: ev.Activity,
-						Billable: billable,
-						Notes:    []string{ev.Note},
-						Tags:     ev.Tags,
-					}
-					// this is a closed entry, so it's the most recent closed so far
-					cpy := e
-					lastClosed = &cpy
-				}
-			}
+		if lastClosed == nil || e.End.After(*lastClosed.End) {
+			cpy := e
+			lastClosed = &cpy
 		}
 	}
 
-	// current may be non-nil here if a running session exists
-	return current, lastClosed, nil
+	return active, lastClosed, nil
 }

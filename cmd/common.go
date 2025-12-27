@@ -98,6 +98,16 @@ type fileEventWriter struct{}
 // WriteEvent implements EventWriter by appending canonical JSON lines to the per-day journal file.
 func (fw *fileEventWriter) WriteEvent(e Event) error {
 	p := journalPathFor(e.TS)
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := lockFile(f); err != nil {
+		return err
+	}
+	defer func() { _ = unlockFile(f) }()
+
 	prev := readLastHash(p)
 	e.PrevHash = prev
 
@@ -120,11 +130,6 @@ func (fw *fileEventWriter) WriteEvent(e Event) error {
 	e.Hash = hex.EncodeToString(h[:])
 
 	line, _ := json.Marshal(e)
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		return err
 	}
