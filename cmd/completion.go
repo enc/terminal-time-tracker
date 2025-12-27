@@ -254,6 +254,12 @@ func customerCompletionList(decisions completionDecisions, aliasCustomer, prefix
 		base = append(base, v)
 	}
 
+	deps, _ := loadDeprecations()
+	base = filterDeprecatedCustomers(base, deps)
+	if deps.isCustomerDeprecated(aliasCustomer) {
+		aliasCustomer = ""
+	}
+
 	filtered := filterPrefixAndSort(base, prefix)
 	return insertAliasCustomer(filtered, aliasCustomer, prefix)
 }
@@ -279,6 +285,12 @@ func projectCompletionList(decisions completionDecisions, customer, aliasProject
 
 	appendProjects(decisions.allowedProjects(customer))
 	appendProjects(decisions.allowedProjects(""))
+
+	deps, _ := loadDeprecations()
+	base = filterDeprecatedProjects(base, deps, customer)
+	if deps.isProjectDeprecated(customer, aliasProject) {
+		aliasProject = ""
+	}
 
 	filtered := filterPrefixAndSort(base, prefix)
 	return insertAliasProject(filtered, aliasProject, prefix)
@@ -335,6 +347,37 @@ func filterPrefixAndSort(list []string, prefix string) []string {
 		}
 	}
 	sort.Strings(out)
+	return out
+}
+
+func filterDeprecatedCustomers(list []string, deps deprecationStore) []string {
+	if len(list) == 0 {
+		return list
+	}
+	out := make([]string, 0, len(list))
+	for _, name := range list {
+		if deps.isCustomerDeprecated(name) {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+func filterDeprecatedProjects(list []string, deps deprecationStore, customer string) []string {
+	if len(list) == 0 {
+		return list
+	}
+	if deps.isCustomerDeprecated(customer) {
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for _, name := range list {
+		if deps.isProjectDeprecated(customer, name) {
+			continue
+		}
+		out = append(out, name)
+	}
 	return out
 }
 

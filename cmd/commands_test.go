@@ -75,6 +75,7 @@ func TestCustomerProjectValidArgsAndAddCmdValidArgs(t *testing.T) {
 	defer os.Setenv("HOME", oldHome)
 
 	viper.Reset()
+	deprecationsCache = nil
 	viper.Set("completion.allow.customers", []string{"Acme", "Beta"})
 	viper.Set("completion.allow.projects", map[string]any{
 		"Acme": []any{"Site", "Mobile"},
@@ -153,6 +154,7 @@ func TestCompletionListsHonorDecisions(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	viper.Reset()
 	mergedCustomerSet = nil
+	deprecationsCache = nil
 
 	viper.Set("completion.allow.customers", []string{"Internal", "Acme"})
 	viper.Set("completion.ignore.customers", []string{"Interal"})
@@ -161,25 +163,32 @@ func TestCompletionListsHonorDecisions(t *testing.T) {
 		"":         []any{"General"},
 	})
 
+	deps := newDeprecationStore()
+	deps.setCustomer("Acme")
+	deps.setProject("Internal", "Platform")
+	if err := saveDeprecations(deps); err != nil {
+		t.Fatalf("save deprecations: %v", err)
+	}
+
 	dec := loadCompletionDecisions()
 	custs := customerCompletionList(dec, "", "")
-	if !reflect.DeepEqual(custs, []string{"Acme", "Internal"}) {
+	if !reflect.DeepEqual(custs, []string{"Internal"}) {
 		t.Fatalf("unexpected allowed customers: %v", custs)
 	}
 
 	custsWithAlias := customerCompletionList(dec, "Acme", "a")
-	if len(custsWithAlias) == 0 || custsWithAlias[0] != "Acme" {
-		t.Fatalf("expected alias customer first, got %v", custsWithAlias)
+	if len(custsWithAlias) != 0 {
+		t.Fatalf("expected deprecated alias customer to be filtered, got %v", custsWithAlias)
 	}
 
 	projs := projectCompletionList(dec, "Internal", "", "")
-	if !reflect.DeepEqual(projs, []string{"General", "Payroll", "Platform"}) {
+	if !reflect.DeepEqual(projs, []string{"General", "Payroll"}) {
 		t.Fatalf("unexpected project list: %v", projs)
 	}
 
 	projsAlias := projectCompletionList(dec, "Internal", "Platform", "pl")
-	if len(projsAlias) == 0 || projsAlias[0] != "Platform" {
-		t.Fatalf("expected alias project first, got %v", projsAlias)
+	if len(projsAlias) != 0 {
+		t.Fatalf("expected deprecated alias project to be filtered, got %v", projsAlias)
 	}
 }
 

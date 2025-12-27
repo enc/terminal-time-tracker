@@ -52,10 +52,14 @@ type projectKey struct {
 
 func prepareReviewState(dec completionDecisions, idx *CompletionIndex) reviewState {
 	st := reviewState{}
+	deps, _ := loadDeprecations()
 
 	for canonical, group := range idx.Customers {
 		canonical = strings.TrimSpace(canonical)
 		if canonical == "" {
+			continue
+		}
+		if deps.isCustomerDeprecated(canonical) {
 			continue
 		}
 		if dec.isCustomerAllowed(canonical) || dec.isCustomerIgnored(canonical) {
@@ -88,6 +92,9 @@ func prepareReviewState(dec completionDecisions, idx *CompletionIndex) reviewSta
 		for projectName, stats := range projMap {
 			project := strings.TrimSpace(projectName)
 			if project == "" {
+				continue
+			}
+			if deps.isProjectDeprecated(canonicalCustomer, project) {
 				continue
 			}
 			if dec.isProjectAllowed(canonicalCustomer, project) || dec.isProjectIgnored(canonicalCustomer, project) {

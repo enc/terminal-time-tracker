@@ -54,8 +54,16 @@ func TestAliasFlagCompletion_FilteringAndList(t *testing.T) {
 }
 
 func TestTicketSetValidArgsUsesCustomerProjectCompletion(t *testing.T) {
+	tmp := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", tmp); err != nil {
+		t.Fatalf("setenv HOME: %v", err)
+	}
+	defer func() { _ = os.Setenv("HOME", oldHome) }()
+
 	viper.Reset()
 	t.Cleanup(viper.Reset)
+	deprecationsCache = nil
 	viper.Set("completion.allow.customers", []string{"Acme", "Beta"})
 	viper.Set("completion.allow.projects", map[string]any{
 		"Acme": []any{"Web", "API"},
