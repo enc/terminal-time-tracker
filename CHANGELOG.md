@@ -1,22 +1,36 @@
 # Changelog
 
-## 0.4.2 - 2025-11-27
+## 0.5.0 - 2025-11-27
 
 ### Added
-- Ticket management via `tt ticket set/list/rm` to associate IDs (e.g., ABC-123) with customer/project pairs.
-- Ticket numbers appear in report labels and prefix ICS event titles alongside notes.
-- Case-insensitive ticket lookups for friendlier matching.
+- `tt deprecate set/list` to hide customers/projects from completion suggestions via `deprecated.yaml` (still allowed for explicit use).
+- Separate `deprecated.yaml` tracking file next to `config.yaml`.
 
-## 0.4.3 - 2025-11-27
+### Changed
+- `tt status` now uses reconstructed entries so amend/split/merge corrections are reflected.
+- Report header displays the configured timezone.
+- Journal writes are serialized with a file lock to avoid hash-chain races.
+- README reorganized for a clearer purpose/guide/commands layout.
+
+## 0.4.10 - 2025-11-27
+
+### Changed
+- ICS event summaries now use `<ticket?> <customer> / <project>` and descriptions carry notes only.
+
+## 0.4.9 - 2025-11-27
+
+### Changed
+- Styled the ticket TUI with Lip Gloss: colored headers, table rows, status/error accents, and clearer edit hints.
+
+## 0.4.8 - 2025-11-27
 
 ### Added
-- Shell completion for `tt ticket set` now suggests customers and projects.
+- Reintroduced `tt ticket tui` with a streamlined flow: list recent projects with tickets, filter missing/assigned/all, edit tickets inline with enter, and immediate writes to config.
 
-## 0.4.4 - 2025-11-27
+## 0.4.7 - 2025-11-27
 
-### Added
-- `tt ticket tui` Bubble Tea interface to add/edit/remove ticket numbers with keyboard-driven navigation.
-- Ticket list output now uses a readable table layout.
+### Changed
+- Removed the ticket TUI (will be redesigned); CLI ticket commands remain.
 
 ## 0.4.5 - 2025-11-27
 
@@ -24,25 +38,23 @@
 - `tt ticket list --missing` to show journal-observed projects lacking a ticket.
 - Ticket TUI shows recent projects when adding a ticket and supports a missing-only filter toggle.
 
-## 0.4.7 - 2025-11-27
-
-### Changed
-- Removed the ticket TUI (will be redesigned); CLI ticket commands remain.
-
-## 0.4.8 - 2025-11-27
+## 0.4.4 - 2025-11-27
 
 ### Added
-- Reintroduced `tt ticket tui` with a streamlined flow: list recent projects with tickets, filter missing/assigned/all, edit tickets inline with enter, and immediate writes to config.
+- `tt ticket tui` Bubble Tea interface to add/edit/remove ticket numbers with keyboard-driven navigation.
+- Ticket list output now uses a readable table layout.
 
-## 0.4.9 - 2025-11-27
+## 0.4.3 - 2025-11-27
 
-### Changed
-- Styled the ticket TUI with Lip Gloss: colored headers, table rows, status/error accents, and clearer edit hints.
+### Added
+- Shell completion for `tt ticket set` now suggests customers and projects.
 
-## 0.4.10 - 2025-11-27
+## 0.4.2 - 2025-11-27
 
-### Changed
-- ICS event summaries now use `<ticket?> <customer> / <project>` and descriptions carry notes only.
+### Added
+- Ticket management via `tt ticket set/list/rm` to associate IDs (e.g., ABC-123) with customer/project pairs.
+- Ticket numbers appear in report labels and prefix ICS event titles alongside notes.
+- Case-insensitive ticket lookups for friendlier matching.
 
 ## 0.4.1 - 2025-11-27
 
