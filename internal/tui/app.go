@@ -166,7 +166,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fsChangeMsg:
 		var cmd tea.Cmd
 		m.dashboard, cmd = m.dashboard.Update(msg)
-		return m, cmd
+		return m, tea.Batch(cmd, listenJournal(m.services.Watch))
 
 	default:
 		var cmd tea.Cmd
@@ -234,6 +234,10 @@ type dashboardModel struct {
 	timelineLoaded    bool
 	timelineErr       error
 
+	// Suggestions cache for quick start/switch previews and form defaults.
+	suggestionCache   []suggestion
+	suggestionsLoaded bool
+
 	status string // simple transient status line (e.g., errors)
 }
 
@@ -262,7 +266,7 @@ func (d dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 		d.last = msg.last
 		d.err = msg.err
 		d.loaded = true
-		return d, nil
+		return d, loadSuggestions(d.svcs.Journal, d.active, d.last)
 
 	case fsChangeMsg:
 		// Reload on external changes.
@@ -281,7 +285,7 @@ func (d dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 		// If a form was active, close it after successful start/switch.
 		d.formMode = false
 		d.form = nil
-		return d, nil
+		return d, loadStatus(d.svcs.Journal)
 
 	case stopDoneMsg:
 		if msg.err != nil {
@@ -289,7 +293,7 @@ func (d dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 		} else {
 			d.status = RenderStatus("ok", "Stopped")
 		}
-		return d, nil
+		return d, loadStatus(d.svcs.Journal)
 
 	case noteSavedMsg:
 		if msg.err != nil {
@@ -297,12 +301,17 @@ func (d dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 		} else {
 			d.status = RenderStatus("ok", "Note saved")
 		}
-		return d, nil
+		return d, loadStatus(d.svcs.Journal)
 
 	case weekLoadedMsg:
 		d.timelineEntries = msg.entries
 		d.timelineErr = msg.err
 		d.timelineLoaded = true
+		return d, nil
+
+	case suggestionsLoadedMsg:
+		d.suggestionCache = msg.suggestions
+		d.suggestionsLoaded = true
 		return d, nil
 
 	case formCancelledMsg:
@@ -369,6 +378,36 @@ func (d dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 		case "s":
 			// Open start/switch form with quick suggestions
 			d.openForm()
+			return d, nil
+		case "t":
+			// Toggle timelines view; load week entries when enabling.
+			d.showTimelines = !d.showTimelines
+			if d.showTimelines {
+				tz := d.svcs.Config.Timezone()
+				if tz == nil {
+					tz = time.Local
+				}
+				d.timelineWeekStart = weekStartMonday(time.Now(), tz)
+				d.timelineLoaded = false
+				d.timelineErr = nil
+				return d, loadWeekEntries(d.svcs.Journal, d.timelineWeekStart)
+			}
+			return d, nil
+		case "h", "<":
+			if d.showTimelines {
+				d.timelineWeekStart = d.timelineWeekStart.AddDate(0, 0, -7)
+				d.timelineLoaded = false
+				d.timelineErr = nil
+				return d, loadWeekEntries(d.svcs.Journal, d.timelineWeekStart)
+			}
+			return d, nil
+		case "l", ">":
+			if d.showTimelines {
+				d.timelineWeekStart = d.timelineWeekStart.AddDate(0, 0, 7)
+				d.timelineLoaded = false
+				d.timelineErr = nil
+				return d, loadWeekEntries(d.svcs.Journal, d.timelineWeekStart)
+			}
 			return d, nil
 		default:
 			return d, nil
@@ -439,9 +478,13 @@ func (d dashboardModel) View() string {
 		extra = d.form.View()
 	} else {
 		// Quick suggestions preview (top 3) when idle
-		preview := d.previewSuggestions()
-		if preview != "" {
-			extra = RenderSection("Suggestions (press s)", preview, d.width)
+		if !d.suggestionsLoaded {
+			extra = RenderSection("Suggestions (press s)", MutedStyle.Render("Loading suggestions…"), d.width)
+		} else {
+			preview := d.previewSuggestions()
+			if preview != "" {
+				extra = RenderSection("Suggestions (press s)", preview, d.width)
+			}
 		}
 	}
 
@@ -468,7 +511,7 @@ func (d dashboardModel) View() string {
 			weekRange := fmt.Sprintf("%s → %s", weekStart.Format("2006-01-02"), weekEnd.Format("2006-01-02"))
 			// Render a compact week-range header above the timeline section.
 			rangeHeader := SectionTitleStyle.Render("Week: "+weekRange) + "\n"
-			body = rangeHeader + RenderWeekTimeline(d.timelineEntries, d.timelineWeekStart, tz, d.width)
+			body = rangeHeader + RenderWeekTimeline(d.timelineEntries, d.timelineWeekStart, tz, d.width, time.Now())
 		}
 		return activeSec + "\n" + lastSec + "\n" + body + statusLine
 	}
@@ -489,6 +532,7 @@ func (d dashboardModel) hints() []Hint {
 			{Key: "Tab", Text: "next field"},
 			{Key: "Shift+Tab", Text: "prev field"},
 			{Key: "Enter", Text: "submit"},
+			{Key: "Ctrl+B", Text: "toggle billable"},
 			{Key: "Esc", Text: "cancel"},
 		}
 	}
@@ -526,6 +570,9 @@ type statusLoadedMsg struct {
 type startDoneMsg struct{ err error }
 type stopDoneMsg struct{ err error }
 type noteSavedMsg struct{ err error }
+type suggestionsLoadedMsg struct {
+	suggestions []suggestion
+}
 
 func tickEvery(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(t time.Time) tea.Msg { return tickMsg(t) })
@@ -556,6 +603,21 @@ func loadStatus(j JournalService) tea.Cmd {
 		from := now.AddDate(0, 0, -7)
 		active, last, err := j.FindActiveAndLast(context.Background(), from, now)
 		return statusLoadedMsg{active: active, last: last, err: err}
+	}
+}
+
+func loadSuggestions(j JournalService, active, last *Entry) tea.Cmd {
+	return func() tea.Msg {
+		if j == nil {
+			return suggestionsLoadedMsg{suggestions: fallbackSuggestions(active, last)}
+		}
+		now := time.Now()
+		from := now.AddDate(0, 0, -30)
+		ents, err := j.LoadEntries(context.Background(), from, now)
+		if err != nil {
+			return suggestionsLoadedMsg{suggestions: fallbackSuggestions(active, last)}
+		}
+		return suggestionsLoadedMsg{suggestions: buildSuggestionsFromEntries(active, last, ents)}
 	}
 }
 
@@ -609,7 +671,10 @@ func saveNote(w EventWriter, text string) tea.Cmd {
 
 func (d *dashboardModel) openForm() {
 	// Build suggestions and instantiate an editable form submodel.
-	sugs := d.buildSuggestions()
+	sugs := d.suggestionCache
+	if !d.suggestionsLoaded {
+		sugs = fallbackSuggestions(d.active, d.last)
+	}
 
 	// Determine a sensible default for billable based on active/last entries.
 	defBill := true
@@ -631,45 +696,9 @@ func (d *dashboardModel) openForm() {
 	d.formMode = true
 }
 
-func (d dashboardModel) buildSuggestions() []suggestion {
-	if d.svcs.Journal == nil {
-		// Use last + active as best-effort suggestions if service is missing.
-		var out []suggestion
-		if d.active != nil {
-			out = append(out, suggestion{
-				Customer: d.active.Customer,
-				Project:  d.active.Project,
-				Activity: d.active.Activity,
-				Billable: d.active.Billable,
-			})
-		}
-		if d.last != nil {
-			out = append(out, suggestion{
-				Customer: d.last.Customer,
-				Project:  d.last.Project,
-				Activity: d.last.Activity,
-				Billable: d.last.Billable,
-			})
-		}
-		return out
-	}
-
-	// Look back a reasonable window and build frequency + recency stats of combos.
-	now := time.Now()
-	from := now.AddDate(0, 0, -30)
-
-	ents, err := d.svcs.Journal.LoadEntries(context.Background(), from, now)
-	if err != nil || len(ents) == 0 {
-		// Fall back to last entry if available.
-		if d.last != nil {
-			return []suggestion{{
-				Customer: d.last.Customer,
-				Project:  d.last.Project,
-				Activity: d.last.Activity,
-				Billable: d.last.Billable,
-			}}
-		}
-		return nil
+func buildSuggestionsFromEntries(active, last *Entry, ents []Entry) []suggestion {
+	if len(ents) == 0 {
+		return fallbackSuggestions(active, last)
 	}
 
 	type stat struct {
@@ -708,8 +737,8 @@ func (d dashboardModel) buildSuggestions() []suggestion {
 			}
 		}
 	}
-	seed(d.active)
-	seed(d.last)
+	seed(active)
+	seed(last)
 
 	for _, e := range ents {
 		k := keyOf(e.Customer, e.Project, e.Activity)
@@ -752,7 +781,7 @@ func (d dashboardModel) buildSuggestions() []suggestion {
 }
 
 func (d dashboardModel) previewSuggestions() string {
-	list := d.buildSuggestions()
+	list := d.suggestionCache
 	if len(list) == 0 {
 		return ""
 	}
@@ -768,7 +797,7 @@ func (d dashboardModel) previewSuggestions() string {
 }
 
 func (d dashboardModel) selectedSuggestion() suggestion {
-	list := d.buildSuggestions()
+	list := d.suggestionCache
 	if len(list) == 0 {
 		defBill := true
 		if d.active != nil {
@@ -787,6 +816,28 @@ func (d dashboardModel) selectedSuggestion() suggestion {
 		sel.Billable = d.last.Billable
 	}
 	return sel
+}
+
+func fallbackSuggestions(active, last *Entry) []suggestion {
+	// Use last + active as best-effort suggestions if service is missing.
+	var out []suggestion
+	if active != nil {
+		out = append(out, suggestion{
+			Customer: active.Customer,
+			Project:  active.Project,
+			Activity: active.Activity,
+			Billable: active.Billable,
+		})
+	}
+	if last != nil {
+		out = append(out, suggestion{
+			Customer: last.Customer,
+			Project:  last.Project,
+			Activity: last.Activity,
+			Billable: last.Billable,
+		})
+	}
+	return out
 }
 
 func startWith(w EventWriter, s suggestion) tea.Cmd {
@@ -857,4 +908,16 @@ func backspace(s string) string {
 	}
 	_, size := utf8.DecodeLastRuneInString(s)
 	return s[:len(s)-size]
+}
+
+func weekStartMonday(now time.Time, tz *time.Location) time.Time {
+	if tz == nil {
+		tz = time.Local
+	}
+	local := now.In(tz)
+	weekday := int(local.Weekday())
+	// Monday should be 0; Go's Weekday starts at Sunday=0.
+	daysSinceMonday := (weekday + 6) % 7
+	start := local.AddDate(0, 0, -daysSinceMonday)
+	return time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, tz)
 }

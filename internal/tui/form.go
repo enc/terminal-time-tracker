@@ -276,8 +276,8 @@ func (f *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Print Type (enum), reported String(), and rune slice content to stderr.
 			fmt.Fprintf(os.Stderr, "DEBUG KeyMsg received: Type=%v String=%q Runes=%#v\n", msg.Type, msg.String(), msg.Runes)
 		}
-		// If the match list is open, route keys to it first so the user can
-		// navigate/select matches with ↑/↓ and Enter; Esc closes the list.
+		// If the match list is open, allow navigation/selection keys to control it,
+		// but still let typing flow into the focused input for live filtering.
 		if f.listOpen {
 			switch keyName(msg) {
 			case "enter":
@@ -298,11 +298,14 @@ func (f *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Close the list without changing the input.
 				f.listOpen = false
 				return f, nil
-			default:
+			case "up", "down", "k", "j":
 				// Let the list handle navigation keys.
 				var cmd tea.Cmd
 				f.matchList, cmd = f.matchList.Update(msg)
 				return f, cmd
+			case "tab", "shift+tab":
+				// Close the list and allow focus navigation to proceed.
+				f.listOpen = false
 			}
 		}
 
@@ -311,6 +314,9 @@ func (f *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		k := keyName(msg)
 
 		switch k {
+		case "ctrl+b":
+			f.defaultBill = !f.defaultBill
+			return f, nil
 		case "tab", "shift+tab", "enter", "up", "k", "down", "j", "ctrl+space":
 			// Handle navigation/focus cycling and open visible completion list on ctrl+space.
 
@@ -543,9 +549,9 @@ func (f *formModel) View() string {
 
 	// Billable hint & instructions
 	b.WriteString("\n")
-	b.WriteString(MutedStyle.Render(fmt.Sprintf("Billable: %v  (toggle with 'b' in dashboard form mode)", f.defaultBill)))
+	b.WriteString(MutedStyle.Render(fmt.Sprintf("Billable: %v  (toggle with Ctrl+B)", f.defaultBill)))
 	b.WriteString("\n\n")
-	b.WriteString(MutedStyle.Render("Tab: next field • Shift+Tab: prev • Enter on Note: submit • Esc: cancel • Ctrl+Space: complete"))
+	b.WriteString(MutedStyle.Render("Tab: next field • Shift+Tab: prev • Enter on Note: submit • Esc: cancel • Ctrl+B: toggle billable • Ctrl+Space: complete"))
 
 	// Wrap entire content in a section box for consistent styling
 	return SectionBoxStyle.Width(f.width).Render(b.String())
@@ -843,6 +849,8 @@ func keyName(k tea.KeyMsg) string {
 		return "enter"
 	case tea.KeyCtrlC:
 		return "ctrl+c"
+	case tea.KeyCtrlB:
+		return "ctrl+b"
 	default:
 		// Fall back to the reported string (useful for letters like "j","k", etc.)
 		return k.String()

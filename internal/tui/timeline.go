@@ -34,10 +34,11 @@ type dayStat struct {
 //
 // The renderer also shows per-day totals (hours and count) on the right of each
 // row and a small legend at the bottom.
-func RenderWeekTimeline(entries []Entry, weekStart time.Time, tz *time.Location, width int) string {
+func RenderWeekTimeline(entries []Entry, weekStart time.Time, tz *time.Location, width int, now time.Time) string {
 	if tz == nil {
 		tz = time.Local
 	}
+	now = now.In(tz)
 
 	// Normalize weekStart to TZ midnight.
 	weekStart = time.Date(weekStart.In(tz).Year(), weekStart.In(tz).Month(), weekStart.In(tz).Day(), 0, 0, 0, 0, tz)
@@ -51,11 +52,15 @@ func RenderWeekTimeline(entries []Entry, weekStart time.Time, tz *time.Location,
 		// Convert entry times to timezone for consistent day boundaries.
 		start := e.Start.In(tz)
 		var end time.Time
+		entryNow := now
 		if e.End != nil {
 			end = e.End.In(tz)
 		} else {
-			// running entries use now as end for totals but still marked as running
-			end = time.Now().In(tz)
+			// running entries use a stable render-time "now" for totals
+			if entryNow.Before(start) {
+				entryNow = start
+			}
+			end = entryNow
 		}
 
 		// Skip entries that end before weekStart or start after weekEnd.
@@ -164,9 +169,12 @@ func RenderWeekTimeline(entries []Entry, weekStart time.Time, tz *time.Location,
 					eet = minTime(e.End.In(tz), dayEnd)
 				} else {
 					// running entry clipped to now or dayEnd
-					now := time.Now().In(tz)
-					if now.Before(dayEnd) {
-						eet = minTime(now, dayEnd)
+					entryNow := now
+					if entryNow.Before(e.Start.In(tz)) {
+						entryNow = e.Start.In(tz)
+					}
+					if entryNow.Before(dayEnd) {
+						eet = minTime(entryNow, dayEnd)
 					}
 				}
 				// Map to columns
@@ -216,9 +224,12 @@ func RenderWeekTimeline(entries []Entry, weekStart time.Time, tz *time.Location,
 				if e.End != nil {
 					eet = minTime(e.End.In(tz), dayEnd)
 				} else {
-					now := time.Now().In(tz)
-					if now.Before(dayEnd) {
-						eet = minTime(now, dayEnd)
+					entryNow := now
+					if entryNow.Before(e.Start.In(tz)) {
+						entryNow = e.Start.In(tz)
+					}
+					if entryNow.Before(dayEnd) {
+						eet = minTime(entryNow, dayEnd)
 					}
 				}
 				relStart := est.Sub(dayStart).Seconds()

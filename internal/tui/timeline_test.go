@@ -43,7 +43,7 @@ func TestRenderWeekTimelineBasic(t *testing.T) {
 	}
 
 	// Use a wide width so full graphical timeline is rendered.
-	out := RenderWeekTimeline(entries, weekStart, time.UTC, 140)
+	out := RenderWeekTimeline(entries, weekStart, time.UTC, 140, weekStart.Add(18*time.Hour))
 
 	// Basic assertions: customer names show up, day heading, and expected duration strings.
 	if !strings.Contains(out, "Acme") {
@@ -90,7 +90,7 @@ func TestRenderWeekTimelineCompactFallback(t *testing.T) {
 	}
 
 	// Small width to force compact rendering path.
-	out := RenderWeekTimeline(entries, weekStart, time.UTC, 20)
+	out := RenderWeekTimeline(entries, weekStart, time.UTC, 20, weekStart.Add(12*time.Hour))
 
 	// Compact output should contain the customer name and day short labels like "Mon"
 	if !strings.Contains(out, "CompactCo") {
@@ -125,7 +125,7 @@ func TestRenderWeekTimelineSpanningBeforeWeek(t *testing.T) {
 		},
 	}
 
-	out := RenderWeekTimeline(entries, weekStart, time.UTC, 120)
+	out := RenderWeekTimeline(entries, weekStart, time.UTC, 120, weekStart.Add(12*time.Hour))
 	if !strings.Contains(out, "SpanCo") {
 		t.Fatalf("expected SpanCo in output; got:\n%s", out)
 	}
@@ -152,7 +152,7 @@ func TestRenderWeekTimelineClippingAfterWeek(t *testing.T) {
 		},
 	}
 
-	out := RenderWeekTimeline(entries, weekStart, time.UTC, 120)
+	out := RenderWeekTimeline(entries, weekStart, time.UTC, 120, weekStart.Add(12*time.Hour))
 	if !strings.Contains(out, "ClipCo") {
 		t.Fatalf("expected ClipCo in output; got:\n%s", out)
 	}
@@ -187,7 +187,7 @@ func TestRenderWeekTimelineLegendAndOrdering(t *testing.T) {
 		},
 	}
 
-	out := RenderWeekTimeline(entries, weekStart, time.UTC, 140)
+	out := RenderWeekTimeline(entries, weekStart, time.UTC, 140, weekStart.Add(18*time.Hour))
 
 	// Legend should include running/billable/non-billable labels
 	if !strings.Contains(out, "running") {
@@ -227,7 +227,7 @@ func TestRenderWeekTimelineRunningEntryLegend(t *testing.T) {
 		},
 	}
 
-	out := RenderWeekTimeline(entries, weekStart, time.UTC, 140)
+	out := RenderWeekTimeline(entries, weekStart, time.UTC, 140, weekStart.Add(18*time.Hour))
 	// The legend always contains 'running' label; also ensure RunCo appears.
 	if !strings.Contains(out, "RunCo") {
 		t.Fatalf("expected RunCo in output for running entry; got:\n%s", out)

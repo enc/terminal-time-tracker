@@ -239,3 +239,26 @@ func TestSuggestMsgHandlingAndListSelection(t *testing.T) {
 		t.Fatalf("suggestMsg with stale id should be ignored but opened list")
 	}
 }
+
+func TestListOpenDoesNotBlockTyping(t *testing.T) {
+	f := newTestForm()
+	f.focused = 0
+	f.customerInput.SetValue("a")
+	f.listOpen = true
+	f.matchList.SetItems(itemsFromStrings([]string{"acme", "acmecorp"}))
+
+	// Type "x" while list is open; input should still accept it.
+	_, _ = f.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if got := f.customerInput.Value(); got != "ax" {
+		t.Fatalf("typing while list open = %q; want %q", got, "ax")
+	}
+}
+
+func TestCtrlBTogglesBillable(t *testing.T) {
+	f := newTestForm()
+	f.defaultBill = false
+	_, _ = f.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	if !f.defaultBill {
+		t.Fatalf("ctrl+b did not toggle billable to true")
+	}
+}
