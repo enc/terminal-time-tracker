@@ -336,6 +336,40 @@ func NewStopEvent(id string, ts time.Time) Event {
 	}
 }
 
+func NewPauseEvent(id, ref string, ts time.Time, ent *Entry) Event {
+	ev := Event{
+		ID:   id,
+		Type: "pause",
+		TS:   ts,
+		Ref:  ref,
+	}
+	if ent != nil {
+		ev.Customer = ent.Customer
+		ev.Project = ent.Project
+		ev.Activity = ent.Activity
+		ev.Billable = boolPtr(ent.Billable)
+		ev.Tags = ent.Tags
+	}
+	return ev
+}
+
+func NewResumeEvent(id, ref string, ts time.Time, ent *Entry) Event {
+	ev := Event{
+		ID:   id,
+		Type: "resume",
+		TS:   ts,
+		Ref:  ref,
+	}
+	if ent != nil {
+		ev.Customer = ent.Customer
+		ev.Project = ent.Project
+		ev.Activity = ent.Activity
+		ev.Billable = boolPtr(ent.Billable)
+		ev.Tags = ent.Tags
+	}
+	return ev
+}
+
 func NewAddEvent(id, customer, project, activity string, billable *bool, note string, tags []string, start, end time.Time) Event {
 	ref := start.Format(time.RFC3339) + ".." + end.Format(time.RFC3339)
 	return Event{
@@ -409,6 +443,45 @@ func loadEntries(from, to time.Time) ([]Entry, error) {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Start.Before(entries[j].Start) })
 
 	return entries, nil
+}
+
+func loadEvents(from, to time.Time) ([]Event, error) {
+	// Normalize to local day boundaries
+	from = time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
+	to = time.Date(to.Year(), to.Month(), to.Day(), 23, 59, 59, 0, to.Location())
+
+	// Build a slice of journal paths covering the requested window plus a one-day
+	// lookback and lookahead to capture cross-midnight events.
+	var paths []string
+	startDay := from.AddDate(0, 0, -1)
+	endDay := to.AddDate(0, 0, 1)
+	for d := startDay; !d.After(endDay); d = d.AddDate(0, 0, 1) {
+		paths = append(paths, journalPathFor(d))
+	}
+
+	var events []Event
+	for _, pth := range paths {
+		f, err := os.Open(pth)
+		if err != nil {
+			continue
+		}
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if line == "" {
+				continue
+			}
+			var ev Event
+			if err := json.Unmarshal([]byte(line), &ev); err != nil {
+				continue
+			}
+			events = append(events, ev)
+		}
+		_ = f.Close()
+	}
+
+	sort.Slice(events, func(i, j int) bool { return events[i].TS.Before(events[j].TS) })
+	return events, nil
 }
 
 func durationMinutes(e Entry) int {
@@ -621,6 +694,50 @@ func FormatStopResultFromEntry(ent *Entry, stopTS time.Time) string {
 		ansiLabel, ent.Project, ansiReset,
 		ent.Activity,
 		startStr, stopStr, dur, billStr)
+}
+
+// FormatPauseResultFromEntry formats a friendly message describing what was
+// paused. It accepts the materialized Entry (as reconstructed from the
+// journal) and the pause time used. If entry is nil, a generic message is
+// returned indicating no running entry was found.
+func FormatPauseResultFromEntry(ent *Entry, pauseTS time.Time) string {
+	if ent == nil {
+		return fmt.Sprintf("%sPaused:%s no running entry found at %s", ansiHeading, ansiReset, formatTS(pauseTS))
+	}
+
+	startStr := formatTS(ent.Start)
+	pauseStr := formatTS(pauseTS)
+	durationMin := int(pauseTS.Sub(ent.Start).Minutes())
+	dur := fmtHHMM(durationMin)
+
+	billStr := "false"
+	if ent.Billable {
+		billStr = "true"
+	}
+
+	return fmt.Sprintf("%sPaused:%s %s%s%s / %s%s%s [%s]\n  started=%s paused=%s duration=%s billable=%s",
+		ansiHeading, ansiReset,
+		ansiLabel, ent.Customer, ansiReset,
+		ansiLabel, ent.Project, ansiReset,
+		ent.Activity,
+		startStr, pauseStr, dur, billStr)
+}
+
+// FormatContinueResult returns a compact, colored (when enabled) one-line summary
+// for a resume event.
+func FormatContinueResult(ev Event) string {
+	cust := ev.Customer
+	proj := ev.Project
+	act := ev.Activity
+	bill := fmtBillable(ev.Billable)
+
+	resume := formatTS(ev.TS)
+
+	return fmt.Sprintf("%sContinued:%s %s%s%s / %s%s%s [%s] at %s billable=%v",
+		ansiHeading, ansiReset,
+		ansiLabel, cust, ansiReset,
+		ansiLabel, proj, ansiReset,
+		act, resume, bill)
 }
 
 // FormatSwitchResult composes a multi-line summary for a switch operation.

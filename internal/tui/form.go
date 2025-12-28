@@ -213,8 +213,15 @@ func (f *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.id != f.debounceID {
 			return f, nil
 		}
-		term := strings.ToLower(strings.TrimSpace(msg.term))
+		termRaw := strings.TrimSpace(msg.term)
+		term := strings.ToLower(termRaw)
 		var matches []string
+
+		// Only auto-open suggestions after at least 1 character.
+		if len(termRaw) < 1 {
+			f.listOpen = false
+			return f, nil
+		}
 
 		// Candidate selection strategy:
 		// 1) prefix matches (fast and precise)
@@ -551,7 +558,7 @@ func (f *formModel) View() string {
 	b.WriteString("\n")
 	b.WriteString(MutedStyle.Render(fmt.Sprintf("Billable: %v  (toggle with Ctrl+B)", f.defaultBill)))
 	b.WriteString("\n\n")
-	b.WriteString(MutedStyle.Render("Tab: next field • Shift+Tab: prev • Enter on Note: submit • Esc: cancel • Ctrl+B: toggle billable • Ctrl+Space: complete"))
+	b.WriteString(MutedStyle.Render("Tab: next field • Shift+Tab: prev • Enter on Note: submit • Esc: cancel • Ctrl+B: toggle billable • Type to complete • Ctrl+Space: show all"))
 
 	// Wrap entire content in a section box for consistent styling
 	return SectionBoxStyle.Width(f.width).Render(b.String())

@@ -224,7 +224,7 @@ func (p *Parser) reconstruct(events []Event, path string) ([]Entry, error) {
 
 	for _, ev := range events {
 		switch ev.Type {
-		case "start":
+		case "start", "resume":
 			if current != nil {
 				// auto-stop previous at this event timestamp
 				cur := ev.TS
@@ -252,7 +252,7 @@ func (p *Parser) reconstruct(events []Event, path string) ([]Entry, error) {
 			if current != nil {
 				current.Notes = append(current.Notes, ev.Note)
 			}
-		case "stop":
+		case "stop", "pause":
 			if current != nil {
 				cur := ev.TS
 				current.End = &cur
@@ -297,7 +297,7 @@ func (p *Parser) reconstruct(events []Event, path string) ([]Entry, error) {
 			// collect and apply later
 			corrections = append(corrections, ev)
 		default:
-			// ignore other event types (pause/resume etc.)
+			// ignore other event types
 		}
 	}
 

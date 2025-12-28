@@ -29,6 +29,8 @@ func init() {
 	// Attach subcommands (each subcommand is in its own file)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(stopCmd)
+	rootCmd.AddCommand(pauseCmd)
+	rootCmd.AddCommand(continueCmd)
 	rootCmd.AddCommand(switchCmd)
 	rootCmd.AddCommand(noteCmd)
 	rootCmd.AddCommand(addCmd)

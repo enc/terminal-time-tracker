@@ -202,12 +202,11 @@ func TestOutOfOrderEventsSorted(t *testing.T) {
 
 func TestUnknownAndOrphanNoteIgnored(t *testing.T) {
 	// Orphan note (no current running entry) should be ignored.
-	// Unknown types like pause/resume are ignored by reconstruction.
+	// Unknown types are ignored by reconstruction.
 	input := strings.Join([]string{
 		`{"id":"n0","type":"note","ts":"2025-01-08T08:30:00Z","note":"ignored"}`,
-		`{"id":"p1","type":"pause","ts":"2025-01-08T08:45:00Z"}`,
+		`{"id":"x1","type":"noop","ts":"2025-01-08T08:45:00Z"}`,
 		`{"id":"s1","type":"start","ts":"2025-01-08T09:00:00Z","project":"proj","activity":"dev"}`,
-		`{"id":"r1","type":"resume","ts":"2025-01-08T09:10:00Z"}`,
 		`{"id":"n1","type":"note","ts":"2025-01-08T09:15:00Z","note":"kept"}`,
 		`{"id":"st1","type":"stop","ts":"2025-01-08T10:00:00Z"}`,
 	}, "\n")
@@ -222,6 +221,31 @@ func TestUnknownAndOrphanNoteIgnored(t *testing.T) {
 	}
 	if len(ents[0].Notes) != 1 || ents[0].Notes[0] != "kept" {
 		t.Fatalf("expected only in-run note to be kept, got %#v", ents[0].Notes)
+	}
+}
+
+func TestPauseResumeSplitEntry(t *testing.T) {
+	input := strings.Join([]string{
+		`{"id":"s1","type":"start","ts":"2025-01-08T09:00:00Z","project":"proj","activity":"dev"}`,
+		`{"id":"p1","type":"pause","ts":"2025-01-08T09:30:00Z"}`,
+		`{"id":"r1","type":"resume","ts":"2025-01-08T10:00:00Z","project":"proj","activity":"dev"}`,
+		`{"id":"st1","type":"stop","ts":"2025-01-08T11:00:00Z"}`,
+	}, "\n")
+
+	p := NewParser("")
+	ents, err := p.ParseReader(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ParseReader error: %v", err)
+	}
+	if len(ents) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(ents))
+	}
+
+	if !ents[0].Start.Equal(mustParse(t, "2025-01-08T09:00:00Z")) || ents[0].End == nil || !ents[0].End.Equal(mustParse(t, "2025-01-08T09:30:00Z")) {
+		t.Fatalf("first paused window mismatch: %v..%v", ents[0].Start, ents[0].End)
+	}
+	if !ents[1].Start.Equal(mustParse(t, "2025-01-08T10:00:00Z")) || ents[1].End == nil || !ents[1].End.Equal(mustParse(t, "2025-01-08T11:00:00Z")) {
+		t.Fatalf("resumed window mismatch: %v..%v", ents[1].Start, ents[1].End)
 	}
 }
 

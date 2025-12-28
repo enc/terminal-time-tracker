@@ -393,7 +393,7 @@ func (d dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 				return d, loadWeekEntries(d.svcs.Journal, d.timelineWeekStart)
 			}
 			return d, nil
-		case "h", "<":
+		case "h", "<", "[":
 			if d.showTimelines {
 				d.timelineWeekStart = d.timelineWeekStart.AddDate(0, 0, -7)
 				d.timelineLoaded = false
@@ -401,9 +401,21 @@ func (d dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 				return d, loadWeekEntries(d.svcs.Journal, d.timelineWeekStart)
 			}
 			return d, nil
-		case "l", ">":
+		case "l", ">", "]":
 			if d.showTimelines {
 				d.timelineWeekStart = d.timelineWeekStart.AddDate(0, 0, 7)
+				d.timelineLoaded = false
+				d.timelineErr = nil
+				return d, loadWeekEntries(d.svcs.Journal, d.timelineWeekStart)
+			}
+			return d, nil
+		case "g":
+			if d.showTimelines {
+				tz := d.svcs.Config.Timezone()
+				if tz == nil {
+					tz = time.Local
+				}
+				d.timelineWeekStart = weekStartMonday(time.Now(), tz)
 				d.timelineLoaded = false
 				d.timelineErr = nil
 				return d, loadWeekEntries(d.svcs.Journal, d.timelineWeekStart)
@@ -510,7 +522,8 @@ func (d dashboardModel) View() string {
 			weekEnd := d.timelineWeekStart.AddDate(0, 0, 6).In(tz)
 			weekRange := fmt.Sprintf("%s → %s", weekStart.Format("2006-01-02"), weekEnd.Format("2006-01-02"))
 			// Render a compact week-range header above the timeline section.
-			rangeHeader := SectionTitleStyle.Render("Week: "+weekRange) + "\n"
+			rangeHeader := SectionTitleStyle.Render("Week: "+weekRange) + "\n" +
+				MutedStyle.Render("h/[/< prev  g current  l/]/> next") + "\n"
 			body = rangeHeader + RenderWeekTimeline(d.timelineEntries, d.timelineWeekStart, tz, d.width, time.Now())
 		}
 		return activeSec + "\n" + lastSec + "\n" + body + statusLine
@@ -543,8 +556,9 @@ func (d dashboardModel) hints() []Hint {
 			{Key: "n", Text: "note"},
 			{Key: "s", Text: "start/switch"},
 			{Key: "t", Text: "timelines"},
-			{Key: "h / <", Text: "prev week"},
-			{Key: "l / >", Text: "next week"},
+			{Key: "h / [ / <", Text: "prev week"},
+			{Key: "g", Text: "current week"},
+			{Key: "l / ] / >", Text: "next week"},
 			{Key: "q", Text: "quit"},
 		}
 	}
