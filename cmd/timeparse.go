@@ -434,9 +434,7 @@ func parseDuration(s string) (time.Duration, error) {
 	if s == "" {
 		return 0, fmt.Errorf("empty duration")
 	}
-	if strings.HasPrefix(s, "+") {
-		s = s[1:]
-	}
+	s = strings.TrimPrefix(s, "+")
 	// time.ParseDuration accepts "1h", "30m", etc. Also accept plain integer minutes like "45" -> treat as minutes.
 	if d, err := time.ParseDuration(s); err == nil {
 		return d, nil

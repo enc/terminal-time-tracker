@@ -10,6 +10,8 @@ tt is a fast, local, billing-friendly time tracker. It stores append-only JSONL 
 # start / stop
 ./tt start acme portal -a dev -n "Kickoff"
 ./tt note "Reviewed PR #42"
+./tt pause
+./tt continue
 ./tt stop
 
 # switch to another task
@@ -32,6 +34,8 @@ tt is a fast, local, billing-friendly time tracker. It stores append-only JSONL 
 Core tracking
 - `tt start [customer] [project]` start a running entry
 - `tt stop` stop the current entry
+- `tt pause` pause the current entry
+- `tt continue` continue the most recently paused entry
 - `tt switch [customer] [project]` stop current and start a new entry at the same timestamp
 - `tt note <text>` attach a note to the running entry
 - `tt add <start> <end> [customer] [project]` add a finished entry in the past
