@@ -38,8 +38,11 @@ func TestTicketTUI_EditSavesAndRefreshes(t *testing.T) {
 	}
 
 	m := newTicketUI()
-	if len(m.entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(m.entries))
+	if len(m.customers) != 1 {
+		t.Fatalf("expected 1 customer, got %d", len(m.customers))
+	}
+	if len(m.currentProjects()) != 1 {
+		t.Fatalf("expected 1 project, got %d", len(m.currentProjects()))
 	}
 	// enter edit
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -57,8 +60,8 @@ func TestTicketTUI_EditSavesAndRefreshes(t *testing.T) {
 		t.Fatalf("unexpected saved: %+v", saved)
 	}
 	found := false
-	for _, e := range model.entries {
-		if e.Customer == "Acme" && e.Project == "API" && e.Ticket == "NEW-2" {
+	for _, p := range model.currentProjects() {
+		if p.Name == "API" && p.Ticket == "NEW-2" {
 			found = true
 		}
 	}
@@ -67,7 +70,7 @@ func TestTicketTUI_EditSavesAndRefreshes(t *testing.T) {
 	}
 }
 
-func TestTicketTUI_FilterMissing(t *testing.T) {
+func TestTicketTUI_ToggleViewAll(t *testing.T) {
 	origLoad := loadTicketsFn
 	origObs := observedProjectsFn
 	defer func() {
@@ -78,6 +81,9 @@ func TestTicketTUI_FilterMissing(t *testing.T) {
 	loadTicketsFn = func() ticketStore {
 		return ticketStore{
 			"Acme": {"API": "ABC-1"},
+			"Gamma": {
+				"Legacy": "LEG-9",
+			},
 		}
 	}
 	observedProjectsFn = func() []observedProject {
@@ -88,13 +94,13 @@ func TestTicketTUI_FilterMissing(t *testing.T) {
 	}
 
 	m := newTicketUI()
-	if len(m.entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(m.entries))
+	if len(m.customers) != 2 {
+		t.Fatalf("expected 2 active customers, got %d", len(m.customers))
 	}
-	// toggle filter to missing
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")}) // all -> missing
+	// toggle view to include inactive
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
 	model := m2.(ticketUIModel)
-	if len(model.entries) != 1 || model.entries[0].Customer != "Beta" {
-		t.Fatalf("expected only missing entry, got %+v", model.entries)
+	if len(model.customers) != 3 {
+		t.Fatalf("expected 3 customers after toggle, got %d", len(model.customers))
 	}
 }
