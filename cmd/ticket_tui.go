@@ -424,7 +424,7 @@ func renderProjectColumn(projects []ticketProject, selected int, focused bool, w
 	var lines []string
 	header := ticketUIStyles.tableHeader.Render(padWidth("Projects", width))
 	lines = append(lines, header)
-	nameW := max(10, width-14)
+	nameW, ticketW := projectColumnWidths(width)
 	for i, p := range projects {
 		prefix := " "
 		if i == selected {
@@ -437,7 +437,7 @@ func renderProjectColumn(projects []ticketProject, selected int, focused bool, w
 		if !p.Active {
 			ticket = ticket + " (inactive)"
 		}
-		row := fmt.Sprintf("%s %-*s %s", prefix, nameW, p.Name, ticket)
+		row := fmt.Sprintf("%s %-*s %-*s", prefix, nameW, p.Name, ticketW, ticket)
 		row = padWidth(row, width)
 		if i == selected && focused {
 			lines = append(lines, ticketUIStyles.rowSelected.Render(row))
@@ -461,6 +461,19 @@ func (m ticketUIModel) columnWidths() (int, int) {
 		projectW = 24
 	}
 	return customerW, projectW
+}
+
+func projectColumnWidths(width int) (int, int) {
+	if width <= 0 {
+		return 28, 20
+	}
+	ticketW := clamp(width/2, 16, 40)
+	nameW := width - ticketW - 2
+	if nameW < 12 {
+		nameW = 12
+		ticketW = max(12, width-nameW-2)
+	}
+	return nameW, ticketW
 }
 
 func padWidth(s string, width int) string {
