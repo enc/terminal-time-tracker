@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1 - 2026-01-26
+
+### Changed
+- Reworked `tt ticket tui` into a two-pane layout showing active customers and projects, with a toggle to include inactive ticket-only entries.
+- Ticket editing now stays anchored to the selected customer/project and preserves selection across view changes.
+- Project list allocates a wider ticket column for longer ticket numbers.
+
 ## 0.5.0 - 2025-11-27
 
 ### Added
